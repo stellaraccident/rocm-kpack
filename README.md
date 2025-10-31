@@ -1,5 +1,7 @@
 # rocm-kpack
 
+Important: This is a prototype of a feature. If successful, it may be added to ROCm eventually.
+
 Kernel packing tool and runtime library for managing ROCm device code distribution.
 
 ## Overview
