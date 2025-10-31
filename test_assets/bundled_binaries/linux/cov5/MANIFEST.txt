@@ -1,22 +1,29 @@
-Test Bundled Binaries Generated: 2025-10-30 18:02:06.641057
+Test Bundled Binaries Generated: 2025-10-30 18:20:34.147493
 ROCm Path: /home/stella/workspace/rocm/gfx1100
 Code Object Version: 5
 Platform: linux
 Compiler: HIP version: 7.1.25432-ba73a9bf4c
 
-Executables:
-- test_kernel_single: Single architecture (gfx1100)
-- test_kernel_multi: Multiple architectures (gfx1100, gfx1101)
-- test_kernel_compressed: Multiple architectures with compression (if supported)
-- test_kernel_wide: Wide architecture coverage (gfx900,906,908,90a,1100)
+Bundled Executables (with GPU device code):
+- test_kernel_single.exe: Single architecture (gfx1100)
+- test_kernel_multi.exe: Multiple architectures (gfx1100, gfx1101)
+- test_kernel_compressed.exe: Multiple architectures with compression (if supported)
+- test_kernel_wide.exe: Wide architecture coverage (gfx900,906,908,90a,1100)
 
-Shared Libraries:
+Bundled Shared Libraries (with GPU device code):
 - libtest_kernel_single.so: Single architecture (gfx1100)
 - libtest_kernel_multi.so: Multiple architectures (gfx1100, gfx1101)
 
-Each file contains the same simple HIP kernels (vectorAdd, scalarMultiply).
+Host-Only Binaries (NO GPU device code, for negative testing):
+- host_only.exe: Host-only executable
+- libhost_only.so: Host-only shared library
 
-Source: test_generation/simple_kernel.hip
+Bundled binaries contain HIP kernels (vectorAdd, scalarMultiply) with .hip_fatbin sections.
+Host-only binaries contain only CPU code with no .hip_fatbin sections.
+
+Sources:
+- test_generation/simple_kernel.hip (GPU kernels)
+- test_generation/host_only.cpp (host-only code)
 Build Script: test_generation/build_test_bundles.py
 
 These assets are used to test unbundling functionality across:
@@ -25,3 +32,4 @@ These assets are used to test unbundling functionality across:
 - Single vs multiple architectures
 - Different code object versions
 - ELF (Linux) vs PE/COFF (Windows) formats
+- Positive tests (bundled binaries) vs negative tests (host-only binaries)

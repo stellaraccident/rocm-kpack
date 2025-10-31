@@ -27,6 +27,7 @@ class BundleBuilder:
         """
         self.script_dir = Path(__file__).parent
         self.kernel_src = self.script_dir / "simple_kernel.hip"
+        self.host_only_src = self.script_dir / "host_only.cpp"
 
         # Detect platform first (needed by other methods)
         system = platform.system().lower()
@@ -35,6 +36,7 @@ class BundleBuilder:
         # Find ROCm and tools
         self.rocm_path = self._find_rocm(rocm_path)
         self.hipcc = self._find_hipcc()
+        self.clang = self._find_clang()
 
         # Detect code object version
         self.code_object_version = self._detect_code_object_version()
@@ -96,6 +98,29 @@ class BundleBuilder:
 
         raise RuntimeError(f"Could not find hipcc at {hipcc}")
 
+    def _find_clang(self) -> Path:
+        """Find clang++ compiler for host-only builds.
+
+        Returns:
+            Path to clang++ executable
+
+        Raises:
+            RuntimeError: If clang++ cannot be found
+        """
+        # Try in ROCm LLVM bin directory
+        clang_name = "clang++.exe" if self.platform == "windows" else "clang++"
+        clang = self.rocm_path / "lib" / "llvm" / "bin" / clang_name
+
+        if clang.exists():
+            return clang
+
+        # Try in ROCm llvm/bin directory (alternative layout)
+        clang = self.rocm_path / "llvm" / "bin" / clang_name
+        if clang.exists():
+            return clang
+
+        raise RuntimeError(f"Could not find clang++ in ROCm installation at {self.rocm_path}")
+
     def _detect_code_object_version(self) -> str:
         """Detect code object version from compiler.
 
@@ -133,6 +158,34 @@ class BundleBuilder:
             True if successful, False otherwise
         """
         cmd = [str(self.hipcc)] + args
+        print(f"  Running: {' '.join(cmd)}")
+
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            if output_file.exists():
+                size_kb = output_file.stat().st_size / 1024
+                print(f"  ✓ Created: {output_file.name} ({size_kb:.1f} KB)")
+                return True
+            else:
+                print(f"  ✗ Failed: Output file not created")
+                return False
+        except subprocess.CalledProcessError as e:
+            print(f"  ✗ Failed: {e}")
+            print(f"  stdout: {e.stdout}")
+            print(f"  stderr: {e.stderr}")
+            return False
+
+    def _run_clang(self, args: list[str], output_file: Path) -> bool:
+        """Run clang++ with given arguments.
+
+        Args:
+            args: Arguments to pass to clang++
+            output_file: Output file path
+
+        Returns:
+            True if successful, False otherwise
+        """
+        cmd = [str(self.clang)] + args
         print(f"  Running: {' '.join(cmd)}")
 
         try:
@@ -299,6 +352,43 @@ class BundleBuilder:
             output,
         )
 
+    def build_host_only_executable(self):
+        """Build host-only executable (no GPU device code)."""
+        exe_name = "host_only.exe"
+        print(f"\nBuilding: {exe_name} (host-only executable, no GPU code)")
+        output = self.output_dir / exe_name
+
+        return self._run_clang(
+            [
+                str(self.host_only_src),
+                "-o",
+                str(output),
+                "-DBUILD_EXECUTABLE",
+            ],
+            output,
+        )
+
+    def build_host_only_shared_lib(self):
+        """Build host-only shared library (no GPU device code)."""
+        if self.platform == "windows":
+            lib_name = "host_only.dll"
+        else:
+            lib_name = "libhost_only.so"
+
+        print(f"\nBuilding: {lib_name} (host-only shared library, no GPU code)")
+        output = self.output_dir / lib_name
+
+        return self._run_clang(
+            [
+                str(self.host_only_src),
+                "-o",
+                str(output),
+                "-shared",
+                "-fPIC",
+            ],
+            output,
+        )
+
     def generate_manifest(self):
         """Generate manifest file documenting the test assets."""
         import datetime
@@ -317,7 +407,6 @@ class BundleBuilder:
         except:
             compiler_version = "Unknown"
 
-        exe_ext = ".exe" if self.platform == "windows" else ""
         lib_prefix = "" if self.platform == "windows" else "lib"
         lib_ext = ".dll" if self.platform == "windows" else ".so"
 
@@ -327,19 +416,26 @@ Code Object Version: {self.code_object_version}
 Platform: {self.platform}
 Compiler: {compiler_version}
 
-Executables:
-- test_kernel_single{exe_ext}: Single architecture (gfx1100)
-- test_kernel_multi{exe_ext}: Multiple architectures (gfx1100, gfx1101)
-- test_kernel_compressed{exe_ext}: Multiple architectures with compression (if supported)
-- test_kernel_wide{exe_ext}: Wide architecture coverage (gfx900,906,908,90a,1100)
+Bundled Executables (with GPU device code):
+- test_kernel_single.exe: Single architecture (gfx1100)
+- test_kernel_multi.exe: Multiple architectures (gfx1100, gfx1101)
+- test_kernel_compressed.exe: Multiple architectures with compression (if supported)
+- test_kernel_wide.exe: Wide architecture coverage (gfx900,906,908,90a,1100)
 
-Shared Libraries:
+Bundled Shared Libraries (with GPU device code):
 - {lib_prefix}test_kernel_single{lib_ext}: Single architecture (gfx1100)
 - {lib_prefix}test_kernel_multi{lib_ext}: Multiple architectures (gfx1100, gfx1101)
 
-Each file contains the same simple HIP kernels (vectorAdd, scalarMultiply).
+Host-Only Binaries (NO GPU device code, for negative testing):
+- host_only.exe: Host-only executable
+- {lib_prefix}host_only{lib_ext}: Host-only shared library
 
-Source: test_generation/simple_kernel.hip
+Bundled binaries contain HIP kernels (vectorAdd, scalarMultiply) with .hip_fatbin sections.
+Host-only binaries contain only CPU code with no .hip_fatbin sections.
+
+Sources:
+- test_generation/simple_kernel.hip (GPU kernels)
+- test_generation/host_only.cpp (host-only code)
 Build Script: test_generation/build_test_bundles.py
 
 These assets are used to test unbundling functionality across:
@@ -348,6 +444,7 @@ These assets are used to test unbundling functionality across:
 - Single vs multiple architectures
 - Different code object versions
 - ELF (Linux) vs PE/COFF (Windows) formats
+- Positive tests (bundled binaries) vs negative tests (host-only binaries)
 """
 
         manifest_path.write_text(content)
@@ -369,14 +466,17 @@ These assets are used to test unbundling functionality across:
 
         # Build all variants
         results = {
-            # Executables
+            # Bundled executables
             "test_kernel_single (exe)": self.build_executable_single_arch(),
             "test_kernel_multi (exe)": self.build_executable_multi_arch(),
             "test_kernel_compressed (exe)": self.build_exe_compressed(),
             "test_kernel_wide (exe)": self.build_exe_wide_arch(),
-            # Shared libraries
+            # Bundled shared libraries
             "test_kernel_single (so/dll)": self.build_shared_lib_single_arch(),
             "test_kernel_multi (so/dll)": self.build_shared_lib_multi_arch(),
+            # Host-only binaries (for negative testing)
+            "host_only (exe)": self.build_host_only_executable(),
+            "host_only (so/dll)": self.build_host_only_shared_lib(),
         }
 
         # Generate manifest

@@ -7,6 +7,7 @@ identifying different categories of artifacts:
 - Kernel databases (library-specific kernel collections)
 """
 
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -287,17 +288,58 @@ class ArtifactScanner:
             visitor.visit_opaque_file(artifact_path)
 
     def _is_bundled_binary(self, artifact_path: ArtifactPath) -> bool:
-        """Check if a file is a bundled binary.
+        """Check if a file is a bundled binary with device code.
 
-        This is a heuristic check - for now, we'll consider .so, .a, and .o files
-        as potentially bundled binaries. A more sophisticated check would actually
-        try to list bundles.
+        Detects ELF binaries (executables and shared libraries) that contain
+        bundled GPU device code in .hip_fatbin sections.
+
+        TODO: Add support for Windows PE/COFF binaries. This currently only
+        handles ELF binaries using readelf. For COFF binaries, we'll need
+        to use a different approach (e.g., llvm-objdump or parse PE headers).
+        The repackaging tooling will run on Linux but needs to process both
+        Linux ELF and Windows COFF binaries.
 
         Args:
             artifact_path: Path to check
 
         Returns:
-            True if this might be a bundled binary
+            True if this is a bundled binary with .hip_fatbin section
         """
-        suffix = artifact_path.absolute_path.suffix
-        return suffix in {".so", ".a", ".o", ".co"}
+        file_path = artifact_path.absolute_path
+
+        # Quick extension filter: only check executables and shared libraries
+        # .exe for executables (used on both Linux and Windows in our assets)
+        # .so for Linux shared libraries
+        # .dll for Windows shared libraries
+        # Also check files with no extension (Linux executables)
+        suffix = file_path.suffix.lower()
+        has_no_ext = suffix == ""
+        is_candidate = suffix in {".exe", ".so", ".dll"} or (
+            has_no_ext and file_path.is_file()
+        )
+
+        if not is_candidate:
+            return False
+
+        # Check for .hip_fatbin ELF section using readelf
+        # This only works for ELF binaries (Linux)
+        try:
+            result = subprocess.run(
+                ["readelf", "-S", str(file_path)],
+                capture_output=True,
+                text=True,
+                check=False,  # Don't raise on non-zero exit
+            )
+            # readelf succeeds for ELF files, fails for non-ELF
+            if result.returncode == 0:
+                return ".hip_fatbin" in result.stdout
+        except FileNotFoundError:
+            # readelf not available
+            pass
+        except Exception:
+            # Unexpected error
+            pass
+
+        # For non-ELF files (Windows COFF) or if readelf fails, return False for now
+        # TODO: Implement COFF detection when we have Windows test assets
+        return False
