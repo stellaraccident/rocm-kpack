@@ -17,4 +17,16 @@ def test_assets_dir() -> pathlib.Path:
 
 @pytest.fixture(scope="session")
 def toolchain() -> Toolchain:
+    """Provides a Toolchain, using ROCm installation if available."""
+    # Try to find clang-offload-bundler in common ROCm locations
+    potential_paths = [
+        pathlib.Path("/home/stella/workspace/rocm/gfx1100/lib/llvm/bin/clang-offload-bundler"),
+        pathlib.Path("/opt/rocm/llvm/bin/clang-offload-bundler"),
+    ]
+
+    for path in potential_paths:
+        if path.exists():
+            return Toolchain(clang_offload_bundler=path)
+
+    # Fall back to system PATH
     return Toolchain()
