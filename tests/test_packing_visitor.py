@@ -296,3 +296,58 @@ def test_packing_visitor_relative_path_from_subdirectory(
     )
     assert marker_lib is not None
     assert "../.kpack/test-gfx1100.kpack" in marker_lib["kpack_search_paths"]
+
+
+def test_packing_visitor_preserves_symlinks(tmp_path: Path, toolchain: Toolchain):
+    """Test that symlinks are preserved rather than followed."""
+    input_tree = tmp_path / "input"
+    output_tree = tmp_path / "output"
+    input_tree.mkdir()
+    output_tree.mkdir()
+
+    # Create a file and symlinks to it
+    (input_tree / "lib").mkdir()
+    actual_file = input_tree / "lib" / "libfoo.so.1.0"
+    actual_file.write_text("actual file content")
+
+    symlink1 = input_tree / "lib" / "libfoo.so.1"
+    symlink1.symlink_to("libfoo.so.1.0")
+
+    symlink2 = input_tree / "lib" / "libfoo.so"
+    symlink2.symlink_to("libfoo.so.1")
+
+    # Process tree
+    visitor = PackingVisitor(
+        output_root=output_tree,
+        group_name="test",
+        gfx_arch_family="gfx1100",
+        gfx_arches=["gfx1100"],
+        toolchain=toolchain,
+    )
+
+    registry = RecognizerRegistry()
+    scanner = ArtifactScanner(registry, toolchain=toolchain)
+    scanner.scan_tree(input_tree, visitor)
+    visitor.finalize()
+
+    # Verify symlinks are preserved
+    out_actual = output_tree / "lib" / "libfoo.so.1.0"
+    out_symlink1 = output_tree / "lib" / "libfoo.so.1"
+    out_symlink2 = output_tree / "lib" / "libfoo.so"
+
+    assert out_actual.exists()
+    assert out_actual.is_file()
+    assert not out_actual.is_symlink()
+    assert out_actual.read_text() == "actual file content"
+
+    assert out_symlink1.exists()
+    assert out_symlink1.is_symlink()
+    assert out_symlink1.readlink() == Path("libfoo.so.1.0")
+
+    assert out_symlink2.exists()
+    assert out_symlink2.is_symlink()
+    assert out_symlink2.readlink() == Path("libfoo.so.1")
+
+    # Verify no duplicate copies
+    stats = visitor.get_stats()
+    assert stats["opaque_files"] == 3  # 1 file + 2 symlinks

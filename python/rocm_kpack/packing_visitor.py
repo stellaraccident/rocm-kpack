@@ -71,6 +71,8 @@ class PackingVisitor(ArtifactVisitor):
     def visit_opaque_file(self, artifact_path: ArtifactPath) -> None:
         """Copy opaque file verbatim to output tree.
 
+        Preserves symlinks rather than following them.
+
         Args:
             artifact_path: Path information for the opaque file
         """
@@ -78,7 +80,13 @@ class PackingVisitor(ArtifactVisitor):
 
         dest = self.output_root / artifact_path.relative_path
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(artifact_path.absolute_path, dest)
+
+        # Preserve symlinks instead of following them
+        if artifact_path.absolute_path.is_symlink():
+            link_target = artifact_path.absolute_path.readlink()
+            dest.symlink_to(link_target)
+        else:
+            shutil.copy2(artifact_path.absolute_path, dest)
 
     def visit_bundled_binary(
         self, artifact_path: ArtifactPath, bundled_binary: BundledBinary

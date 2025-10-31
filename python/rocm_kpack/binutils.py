@@ -57,10 +57,11 @@ class Toolchain:
         return explicit_path
 
     def exec_capture_text(self, args: list[str | Path]):
-        return subprocess.check_output([str(a) for a in args]).decode()
+        return subprocess.check_output([str(a) for a in args], stderr=subprocess.STDOUT).decode()
 
     def exec(self, args: list[str | Path]):
-        subprocess.check_call([str(a) for a in args])
+        # Use check_output to capture stderr in exceptions (discarding the output)
+        subprocess.check_output([str(a) for a in args], stderr=subprocess.STDOUT)
 
 
 class UnbundledContents:
@@ -216,18 +217,32 @@ class BundledBinary:
     def _list_bundled_targets(self, file_path: Path) -> list[tuple[str, str]]:
         """Returns a list of (target_name, file_name) for all bundles."""
         bundler_input = self._get_bundler_input()
-        lines = (
-            self.toolchain.exec_capture_text(
-                [
-                    self.toolchain.clang_offload_bundler,
-                    "--list",
-                    "--type=o",
-                    f"--input={bundler_input}",
-                ]
+
+        # Try clang-offload-bundler first
+        try:
+            lines = (
+                self.toolchain.exec_capture_text(
+                    [
+                        self.toolchain.clang_offload_bundler,
+                        "--list",
+                        "--type=o",
+                        f"--input={bundler_input}",
+                    ]
+                )
+                .strip()
+                .splitlines()
             )
-            .strip()
-            .splitlines()
-        )
+        except subprocess.CalledProcessError as e:
+            # Check if this is the known decompression bug with CCOB bundles
+            # Issue: https://github.com/ROCm/llvm-project/issues/448
+            # (stderr is merged into stdout by exec_capture_text)
+            error_msg = e.output.decode() if isinstance(e.output, bytes) else str(e.output)
+
+            if "decompress" in error_msg.lower() or "src size is incorrect" in error_msg.lower():
+                # Fall back to our CCOB parser
+                return self._list_bundled_targets_with_ccob_parser(bundler_input)
+            # Re-raise other errors
+            raise
 
         def _map(target_name: str) -> str:
             if target_name.startswith("host"):
@@ -238,6 +253,31 @@ class BundledBinary:
 
         return [
             (target_name, _map(target_name)) for target_name in lines if target_name
+        ]
+
+    def _list_bundled_targets_with_ccob_parser(self, fatbin_path: Path) -> list[tuple[str, str]]:
+        """Fallback: List targets using our CCOB parser when clang-offload-bundler fails.
+
+        Args:
+            fatbin_path: Path to extracted .hip_fatbin section or standalone bundle
+
+        Returns:
+            List of (target_name, filename) tuples
+        """
+        from rocm_kpack.ccob_parser import list_ccob_targets
+
+        data = fatbin_path.read_bytes()
+        targets = list_ccob_targets(data)
+
+        def _map(target_name: str) -> str:
+            if target_name.startswith("host"):
+                return f"{target_name}.elf"
+            elif target_name.startswith("hip"):
+                return f"{target_name}.hsaco"
+            raise ValueError(f"Unexpected unbundled target name {target_name}")
+
+        return [
+            (target_name, _map(target_name)) for target_name in targets if target_name
         ]
 
     def _unbundle(self, *, targets: list[str], outputs: list[Path]):
@@ -251,16 +291,55 @@ class BundledBinary:
             return
 
         bundler_input = self._get_bundler_input()
-        args = [
-            self.toolchain.clang_offload_bundler,
-            "--unbundle",
-            "--type=o",
-            f"--input={bundler_input}",
-            f"--targets={','.join(targets)}",
-        ]
-        for output in outputs:
-            args.extend(["--output", output])
-        self.toolchain.exec(args)
+
+        # Try clang-offload-bundler first
+        try:
+            args = [
+                self.toolchain.clang_offload_bundler,
+                "--unbundle",
+                "--type=o",
+                f"--input={bundler_input}",
+                f"--targets={','.join(targets)}",
+            ]
+            for output in outputs:
+                args.extend(["--output", output])
+            self.toolchain.exec(args)
+        except subprocess.CalledProcessError as e:
+            # Check if this is the known decompression bug with CCOB bundles
+            # Issue: https://github.com/ROCm/llvm-project/issues/448
+            # (stderr is merged into stdout/output by exec)
+            error_msg = e.output.decode() if isinstance(e.output, bytes) else str(e.output)
+
+            if "decompress" in error_msg.lower() or "src size is incorrect" in error_msg.lower():
+                # Fall back to our CCOB parser
+                self._unbundle_with_ccob_parser(bundler_input, targets=targets, outputs=outputs)
+            else:
+                # Re-raise other errors
+                raise
+
+    def _unbundle_with_ccob_parser(self, fatbin_path: Path, *, targets: list[str], outputs: list[Path]):
+        """Fallback: Unbundle using our CCOB parser when clang-offload-bundler fails.
+
+        Args:
+            fatbin_path: Path to extracted .hip_fatbin section or standalone bundle
+            targets: List of target names to unbundle
+            outputs: List of output paths (must match length of targets)
+        """
+        from rocm_kpack.ccob_parser import parse_ccob_file
+
+        if len(targets) != len(outputs):
+            raise ValueError(f"targets and outputs must have same length: {len(targets)} != {len(outputs)}")
+
+        # Parse the CCOB bundle
+        bundle = parse_ccob_file(fatbin_path)
+
+        # Extract each requested target
+        for target, output in zip(targets, outputs):
+            code_obj = bundle.get_code_object(target)
+            if code_obj is None:
+                raise RuntimeError(f"Target {target} not found in bundle")
+
+            output.write_bytes(code_obj)
 
     def list_bundles(self) -> list[str]:
         """List all architecture bundles in the binary.
