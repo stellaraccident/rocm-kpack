@@ -1,0 +1,27 @@
+Test Bundled Binaries Generated: 2025-10-30 18:02:06.641057
+ROCm Path: /home/stella/workspace/rocm/gfx1100
+Code Object Version: 5
+Platform: linux
+Compiler: HIP version: 7.1.25432-ba73a9bf4c
+
+Executables:
+- test_kernel_single: Single architecture (gfx1100)
+- test_kernel_multi: Multiple architectures (gfx1100, gfx1101)
+- test_kernel_compressed: Multiple architectures with compression (if supported)
+- test_kernel_wide: Wide architecture coverage (gfx900,906,908,90a,1100)
+
+Shared Libraries:
+- libtest_kernel_single.so: Single architecture (gfx1100)
+- libtest_kernel_multi.so: Multiple architectures (gfx1100, gfx1101)
+
+Each file contains the same simple HIP kernels (vectorAdd, scalarMultiply).
+
+Source: test_generation/simple_kernel.hip
+Build Script: test_generation/build_test_bundles.py
+
+These assets are used to test unbundling functionality across:
+- Executables and shared libraries
+- Uncompressed vs compressed code objects
+- Single vs multiple architectures
+- Different code object versions
+- ELF (Linux) vs PE/COFF (Windows) formats
