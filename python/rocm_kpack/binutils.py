@@ -4,6 +4,9 @@ import shutil
 import subprocess
 import tempfile
 from enum import Enum
+from typing import Any
+
+import msgpack
 
 
 class BinaryType(Enum):
@@ -321,3 +324,126 @@ class BundledBinary:
     def __del__(self):
         """Cleanup on deletion."""
         self.cleanup()
+
+
+def add_kpack_ref_marker(
+    binary_path: Path,
+    output_path: Path,
+    kpack_search_paths: list[str],
+    kernel_name: str,
+    *,
+    toolchain: Toolchain | None = None,
+) -> None:
+    """Add .rocm_kpack_ref marker section to a binary.
+
+    The marker section contains a MessagePack structure pointing to kpack files
+    and identifying the kernel name for TOC lookup.
+
+    Args:
+        binary_path: Path to input binary (ELF executable or shared library)
+        output_path: Path where marked binary will be written
+        kpack_search_paths: List of kpack file paths relative to binary location
+        kernel_name: Kernel identifier for TOC lookup in kpack file
+        toolchain: Toolchain instance (created if not provided)
+
+    Raises:
+        RuntimeError: If objcopy fails to add section
+    """
+    if toolchain is None:
+        toolchain = Toolchain()
+
+    # Create marker structure
+    marker_data = {
+        "kpack_search_paths": kpack_search_paths,
+        "kernel_name": kernel_name,
+    }
+
+    # Serialize to MessagePack
+    marker_bytes = msgpack.packb(marker_data, use_bin_type=True)
+
+    # Write marker to temporary file and add section
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".marker") as f:
+        f.write(marker_bytes)
+        f.flush()
+
+        # Add section to binary using objcopy
+        # Use absolute paths to avoid objcopy path resolution issues
+        abs_binary_path = binary_path.resolve()
+        abs_output_path = output_path.resolve()
+        abs_marker_file = Path(f.name).resolve()
+
+        try:
+            toolchain.exec(
+                [
+                    toolchain.objcopy,
+                    "--add-section",
+                    f".rocm_kpack_ref={abs_marker_file}",
+                    abs_binary_path,
+                    abs_output_path,
+                ]
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"Failed to add .rocm_kpack_ref section to {binary_path}: {e}"
+            )
+
+
+def read_kpack_ref_marker(
+    binary_path: Path,
+    *,
+    toolchain: Toolchain | None = None,
+) -> dict[str, Any] | None:
+    """Read .rocm_kpack_ref marker section from a binary.
+
+    Args:
+        binary_path: Path to binary with marker section
+        toolchain: Toolchain instance (created if not provided)
+
+    Returns:
+        Marker data dictionary, or None if section doesn't exist
+
+    Raises:
+        RuntimeError: If readelf fails or section exists but cannot be read or parsed
+    """
+    if toolchain is None:
+        toolchain = Toolchain()
+
+    # Check if section exists using readelf
+    result = subprocess.run(
+        [str(toolchain.readelf), "-S", str(binary_path.resolve())],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if ".rocm_kpack_ref" not in result.stdout:
+        return None
+
+    # Extract section to temporary file
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".marker") as f:
+        abs_binary_path = binary_path.resolve()
+        abs_marker_file = Path(f.name).resolve()
+
+        try:
+            toolchain.exec(
+                [
+                    toolchain.objcopy,
+                    "--dump-section",
+                    f".rocm_kpack_ref={abs_marker_file}",
+                    abs_binary_path,
+                ]
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"Failed to extract .rocm_kpack_ref section from {binary_path}: {e}"
+            )
+
+        # Read and parse MessagePack data
+        try:
+            with open(abs_marker_file, "rb") as marker_file:
+                marker_bytes = marker_file.read()
+                marker_data = msgpack.unpackb(marker_bytes, raw=False)
+                return marker_data
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to parse .rocm_kpack_ref marker data from {binary_path}: {e}"
+            )
