@@ -388,6 +388,8 @@ class ArtifactScanner:
 
         # Determine if this file is a candidate for bundled binary detection
         # Include .hip files (ROCm test executables with device code)
+        # TODO: Remove all suffix based scanning in favor of content based
+        # scanning per above.
         is_candidate = (
             suffix in {".exe", ".dll", ".hip"} or
             has_so_extension or

@@ -166,6 +166,8 @@ class PackingVisitor(ArtifactVisitor):
             # Note: We must NOT use self.executor here to avoid deadlock - the scanner
             # already fills the executor with _process_path tasks, so nested executor.submit()
             # calls would block forever waiting for threads that are all busy waiting.
+            # There may be secondary parallelism to exploit later, and we retain the
+            # executor for that eventuality.
             prepared_kernels = parallel_prepare_kernels(
                 self.archive, kernels_to_prepare, executor=None
             )
