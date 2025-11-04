@@ -9,6 +9,7 @@ identifying different categories of artifacts:
 
 import subprocess
 from abc import ABC, abstractmethod
+from concurrent.futures import Executor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -208,33 +209,60 @@ class ArtifactScanner:
 
     Uses a registry of recognizers to identify kernel databases, and falls back
     to treating files as opaque or bundled binaries.
+
+    Supports parallel scanning when provided with an executor.
     """
 
     def __init__(
-        self, recognizer_registry: RecognizerRegistry, toolchain: Toolchain | None = None
+        self,
+        recognizer_registry: RecognizerRegistry,
+        toolchain: Toolchain | None = None,
+        executor: Executor | None = None,
     ):
         """Initialize the scanner.
 
         Args:
             recognizer_registry: Registry of database recognizers
             toolchain: Toolchain for bundled binary operations (optional)
+            executor: Executor for parallel scanning (optional, default: sequential)
         """
         self.registry = recognizer_registry
         self.toolchain = toolchain
+        self.executor = executor
         # Track relative paths of visited databases to avoid double-visiting
         self._visited_database_paths: set[Path] = set()
 
     def scan_tree(self, root_dir: Path, visitor: ArtifactVisitor) -> None:
         """Walk the tree and invoke visitor callbacks.
 
+        If an executor was provided, processes paths in parallel.
+        Otherwise, processes sequentially.
+
+        Paths are streamed incrementally - processing begins immediately
+        as paths are discovered, rather than collecting all paths upfront.
+
         Args:
             root_dir: Root directory to scan (stored as root for all ArtifactPaths)
-            visitor: Visitor to receive callbacks
+            visitor: Visitor to receive callbacks (must be thread-safe if using executor)
         """
-        for abs_path in self._walk_tree(root_dir):
-            relative_path = abs_path.relative_to(root_dir)
-            artifact_path = ArtifactPath(root_dir, relative_path)
-            self._process_path(artifact_path, visitor)
+        if self.executor is None:
+            # Sequential processing: process as we walk
+            for abs_path in self._walk_tree(root_dir):
+                relative_path = abs_path.relative_to(root_dir)
+                artifact_path = ArtifactPath(root_dir, relative_path)
+                self._process_path(artifact_path, visitor)
+        else:
+            # Parallel processing: submit to executor as we walk
+            futures = []
+            for abs_path in self._walk_tree(root_dir):
+                relative_path = abs_path.relative_to(root_dir)
+                artifact_path = ArtifactPath(root_dir, relative_path)
+                future = self.executor.submit(self._process_path, artifact_path, visitor)
+                futures.append(future)
+
+            # Wait for all to complete (will raise exceptions if any occurred)
+            for future in as_completed(futures):
+                future.result()  # Propagate exceptions
 
     def _walk_tree(self, root_dir: Path) -> Iterator[Path]:
         """Walk the directory tree, yielding all paths.
@@ -359,8 +387,9 @@ class ArtifactScanner:
         has_no_ext = (suffix == "" and file_path.is_file())
 
         # Determine if this file is a candidate for bundled binary detection
+        # Include .hip files (ROCm test executables with device code)
         is_candidate = (
-            suffix in {".exe", ".dll"} or
+            suffix in {".exe", ".dll", ".hip"} or
             has_so_extension or
             has_no_ext
         )

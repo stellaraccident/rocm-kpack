@@ -7,12 +7,15 @@ Transforms an install tree containing bundled binaries into:
 """
 
 import argparse
+import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from rocm_kpack.artifact_scanner import ArtifactScanner, RecognizerRegistry
 from rocm_kpack.binutils import Toolchain
+from rocm_kpack.compression import ZstdCompressor
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.packing_visitor import PackingVisitor
 
@@ -72,6 +75,24 @@ Examples:
         required=True,
         help="Comma-separated list of actual architectures in family",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Number of worker threads for parallel kernel preparation (default: auto-detect CPU count)",
+    )
+    parser.add_argument(
+        "--compression",
+        choices=["none", "zstd"],
+        default="zstd",
+        help="Compression scheme for kernels (default: zstd)",
+    )
+    parser.add_argument(
+        "--compression-level",
+        type=int,
+        default=3,
+        help="Compression level for zstd (1-22, default: 3)",
+    )
     Toolchain.configure_argparse(parser)
 
     args = parser.parse_args()
@@ -93,12 +114,23 @@ Examples:
     # Create output directory
     args.output.mkdir(parents=True, exist_ok=True)
 
+    # Determine worker count
+    if args.max_workers is None:
+        cpu_count = os.cpu_count() or 1
+        max_workers = cpu_count
+    else:
+        max_workers = max(1, args.max_workers)
+
     print(f"Packing install tree:")
     print(f"  Input:            {args.input}")
     print(f"  Output:           {args.output}")
     print(f"  Group:            {args.group_name}")
     print(f"  Arch family:      {args.gfx_arch_family}")
     print(f"  Architectures:    {', '.join(gfx_arches)}")
+    print(f"  Compression:      {args.compression}")
+    if args.compression == "zstd":
+        print(f"  Compression level: {args.compression_level}")
+    print(f"  Worker threads:   {max_workers}")
     print()
 
     # Initialize toolchain
@@ -113,41 +145,52 @@ Examples:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    # Create visitor
-    visitor = PackingVisitor(
-        output_root=args.output,
-        group_name=args.group_name,
-        gfx_arch_family=args.gfx_arch_family,
-        gfx_arches=gfx_arches,
-        toolchain=toolchain,
-    )
+    # Set up compression
+    compressor = None
+    if args.compression == "zstd":
+        compressor = ZstdCompressor(compression_level=args.compression_level)
 
-    # Scan and process tree
-    print("Scanning tree...")
-    start_time = time.time()
+    # Create visitor with executor for parallel processing
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        visitor = PackingVisitor(
+            output_root=args.output,
+            group_name=args.group_name,
+            gfx_arch_family=args.gfx_arch_family,
+            gfx_arches=gfx_arches,
+            toolchain=toolchain,
+            executor=executor,
+        )
 
-    registry = RecognizerRegistry()
-    scanner = ArtifactScanner(registry, toolchain=toolchain)
+        # Override compressor if specified
+        if compressor is not None:
+            visitor.archive._compressor = compressor
 
-    try:
-        scanner.scan_tree(args.input, visitor)
-    except Exception as e:
-        print(f"\nError during scanning: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return 1
+        # Scan and process tree
+        print("Scanning tree...")
+        start_time = time.time()
 
-    scan_time = time.time() - start_time
+        registry = RecognizerRegistry()
+        scanner = ArtifactScanner(registry, toolchain=toolchain, executor=executor)
 
-    # Finalize
-    print("Finalizing .kpack archive...")
-    try:
-        visitor.finalize()
-    except Exception as e:
-        print(f"\nError during finalization: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return 1
+        try:
+            scanner.scan_tree(args.input, visitor)
+        except Exception as e:
+            print(f"\nError during scanning: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            return 1
+
+        scan_time = time.time() - start_time
+
+        # Finalize
+        print("Finalizing .kpack archive...")
+        try:
+            visitor.finalize()
+        except Exception as e:
+            print(f"\nError during finalization: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            return 1
 
     total_time = time.time() - start_time
 

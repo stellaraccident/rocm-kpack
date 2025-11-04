@@ -230,18 +230,22 @@ class ZstdCompressor(Compressor):
                               3 is the zstd default, good balance of speed/ratio
         """
         self.compression_level = compression_level
-        self._compressor = zstd.ZstdCompressor(level=compression_level)
-        self._decompressor = zstd.ZstdDecompressor()
 
         # For reading mode
         self._file_path = None
         self._zstd_offset = None
         self._zstd_size = None
         self._frame_index = None  # Built on first access: [(offset, size, original_size), ...]
+        self._decompressor = None  # Created lazily for reading
 
     def prepare_kernel(self, kernel_data: bytes, kernel_id: str) -> CompressionInput:
-        """Compress kernel immediately (work done in parallel)."""
-        compressed = self._compressor.compress(kernel_data)
+        """Compress kernel immediately (work done in parallel).
+
+        Creates a fresh compressor instance for thread-safety.
+        ZstdCompressor objects are not thread-safe, so we create one per call.
+        """
+        compressor = zstd.ZstdCompressor(level=self.compression_level)
+        compressed = compressor.compress(kernel_data)
         return ZstdCompressionInput(
             kernel_id=kernel_id,
             compressed_frame=compressed,
@@ -338,7 +342,9 @@ class ZstdCompressor(Compressor):
         frame_offset, frame_size = self._frame_index[ordinal]
         compressed_frame = self._blob_data[frame_offset : frame_offset + frame_size]
 
-        # Decompress
+        # Decompress (create decompressor lazily)
+        if self._decompressor is None:
+            self._decompressor = zstd.ZstdDecompressor()
         return self._decompressor.decompress(compressed_frame)
 
 

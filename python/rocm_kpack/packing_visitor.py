@@ -1,12 +1,15 @@
 """Visitor for packing bundled binaries into .kpack archives."""
 
 import shutil
+import threading
+from concurrent.futures import Executor
 from pathlib import Path
 from typing import Any
 
 from rocm_kpack.artifact_scanner import ArtifactPath, ArtifactVisitor
 from rocm_kpack.binutils import BundledBinary, Toolchain, add_kpack_ref_marker
 from rocm_kpack.kpack import PackedKernelArchive
+from rocm_kpack.parallel import parallel_prepare_kernels
 
 
 class PackingVisitor(ArtifactVisitor):
@@ -22,6 +25,9 @@ class PackingVisitor(ArtifactVisitor):
     - Host-only binaries with markers in original locations
     - .kpack/ directory at root with packed kernel archives
     - All other files copied as-is
+
+    Thread-safe: All visitor methods can be called concurrently from multiple threads.
+    Fine-grained locking protects shared state (TOC updates, statistics tracking).
     """
 
     def __init__(
@@ -31,6 +37,7 @@ class PackingVisitor(ArtifactVisitor):
         gfx_arch_family: str,
         gfx_arches: list[str],
         toolchain: Toolchain,
+        executor: Executor | None = None,
     ):
         """Initialize packing visitor.
 
@@ -40,12 +47,15 @@ class PackingVisitor(ArtifactVisitor):
             gfx_arch_family: Architecture family identifier (e.g., "gfx1100", "gfx100X")
             gfx_arches: List of actual architectures in this family
             toolchain: Toolchain for binary operations
+            executor: Optional Executor for parallel kernel preparation.
+                     If None, kernels are prepared sequentially.
         """
         self.output_root = output_root
         self.group_name = group_name
         self.gfx_arch_family = gfx_arch_family
         self.gfx_arches = gfx_arches
         self.toolchain = toolchain
+        self.executor = executor
 
         # Create .kpack directory
         self.kpack_dir = output_root / ".kpack"
@@ -67,42 +77,72 @@ class PackingVisitor(ArtifactVisitor):
         self.visited_bundled_binaries: list[Path] = []
         self.visited_databases: list[Path] = []
 
+        # Lock for thread-safe access to shared state
+        self._lock = threading.Lock()
+
     def visit_opaque_file(self, artifact_path: ArtifactPath) -> None:
         """Copy opaque file verbatim to output tree.
 
         Preserves symlinks rather than following them.
+        Thread-safe: Can be called concurrently. Handles race conditions
+        where multiple threads might try to create the same file.
 
         Args:
             artifact_path: Path information for the opaque file
         """
-        self.visited_opaque_files.append(artifact_path.relative_path)
+        # Track visitation (requires lock)
+        with self._lock:
+            self.visited_opaque_files.append(artifact_path.relative_path)
 
+        # File operations can run in parallel (different paths)
         dest = self.output_root / artifact_path.relative_path
         dest.parent.mkdir(parents=True, exist_ok=True)
+
+        # Skip if destination already exists (race condition in parallel mode)
+        # Another thread may have already processed this path
+        if dest.exists() or dest.is_symlink():
+            return
 
         # Preserve symlinks instead of following them
         if artifact_path.absolute_path.is_symlink():
             link_target = artifact_path.absolute_path.readlink()
-            dest.symlink_to(link_target)
+            try:
+                dest.symlink_to(link_target)
+            except FileExistsError:
+                # Race condition: another thread created it between our check and now
+                pass
         else:
-            shutil.copy2(artifact_path.absolute_path, dest)
+            try:
+                shutil.copy2(artifact_path.absolute_path, dest)
+            except FileExistsError:
+                # Race condition: another thread created it between our check and now
+                pass
 
     def visit_bundled_binary(
         self, artifact_path: ArtifactPath, bundled_binary: BundledBinary
     ) -> None:
         """Extract kernels to kpack and create host-only binary with marker.
 
+        Thread-safe: Can be called concurrently. Unbundling and kernel preparation
+        run in parallel; TOC updates are serialized with fine-grained locking.
+
         Args:
             artifact_path: Path information for the bundled binary
             bundled_binary: BundledBinary instance for the file
         """
-        self.visited_bundled_binaries.append(artifact_path.relative_path)
+        # Track visitation (requires lock)
+        with self._lock:
+            self.visited_bundled_binaries.append(artifact_path.relative_path)
 
         # Get list of architectures in this binary
         architectures = bundled_binary.list_bundles()
 
         # Extract kernels and add to kpack archive
         with bundled_binary.unbundle(delete_on_close=True) as contents:
+            # Batch all kernels from this binary for parallel preparation
+            kernels_to_prepare = []
+            kernel_name = artifact_path.relative_path.as_posix()
+
             for target_name, filename in contents.target_list:
                 # Only process GPU architecture bundles (.hsaco files)
                 if filename.endswith(".hsaco"):
@@ -119,10 +159,20 @@ class PackingVisitor(ArtifactVisitor):
                     kernel_path = contents.dest_dir / filename
                     hsaco_data = kernel_path.read_bytes()
 
-                    # Add to kpack archive
-                    # Use POSIX-style path as kernel name for consistency
-                    kernel_name = artifact_path.relative_path.as_posix()
-                    prepared = self.archive.prepare_kernel(kernel_name, arch, hsaco_data)
+                    # Collect for parallel preparation
+                    kernels_to_prepare.append((kernel_name, arch, hsaco_data, None))
+
+            # Prepare all kernels sequentially (parallelism comes from concurrent binary processing)
+            # Note: We must NOT use self.executor here to avoid deadlock - the scanner
+            # already fills the executor with _process_path tasks, so nested executor.submit()
+            # calls would block forever waiting for threads that are all busy waiting.
+            prepared_kernels = parallel_prepare_kernels(
+                self.archive, kernels_to_prepare, executor=None
+            )
+
+            # Add to archive sequentially (requires lock for TOC manipulation)
+            with self._lock:
+                for prepared in prepared_kernels:
                     self.archive.add_kernel(prepared)
 
         # Create host-only binary (without .hip_fatbin section)
@@ -153,6 +203,7 @@ class PackingVisitor(ArtifactVisitor):
     ) -> None:
         """Handle kernel database artifacts.
 
+        Thread-safe: Can be called concurrently.
         TODO: Implement DatabaseHandlers for ad-hoc kernel libraries.
         For now, just track that we visited them.
 
@@ -160,7 +211,9 @@ class PackingVisitor(ArtifactVisitor):
             artifact_path: Path information for the database
             database: Database instance
         """
-        self.visited_databases.append(artifact_path.relative_path)
+        # Track visitation (requires lock)
+        with self._lock:
+            self.visited_databases.append(artifact_path.relative_path)
         # TODO: Inject DatabaseHandlers to process ad-hoc kernel libraries
         # For now, just track visitation
 

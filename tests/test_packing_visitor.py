@@ -2,14 +2,33 @@
 
 import shutil
 import subprocess
+from concurrent.futures import Executor, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from rocm_kpack.artifact_scanner import ArtifactScanner, RecognizerRegistry
 from rocm_kpack.binutils import Toolchain, read_kpack_ref_marker
+from rocm_kpack.compression import ZstdCompressor
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.packing_visitor import PackingVisitor
+
+
+@pytest.fixture(
+    params=[
+        pytest.param(None, id="sequential"),
+        pytest.param("executor", id="parallel"),
+    ]
+)
+def executor(request) -> Executor | None:
+    """Provide both sequential (None) and parallel (ThreadPoolExecutor) modes."""
+    if request.param is None:
+        yield None
+    else:
+        # Create a ThreadPoolExecutor for parallel tests
+        executor = ThreadPoolExecutor(max_workers=2)
+        yield executor
+        executor.shutdown(wait=True)
 
 
 @pytest.fixture
@@ -48,7 +67,7 @@ def test_tree_with_bundled_binaries(tmp_path: Path, test_assets_dir: Path) -> Pa
 
 
 def test_packing_visitor_basic_workflow(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain
+    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
 ):
     """Test basic packing workflow: extract kernels, create host binaries, add markers."""
     input_tree = test_tree_with_bundled_binaries
@@ -62,6 +81,7 @@ def test_packing_visitor_basic_workflow(
         gfx_arch_family="gfx1100",
         gfx_arches=["gfx1100", "gfx1101"],
         toolchain=toolchain,
+        executor=executor,
     )
 
     # Scan and process tree
@@ -88,7 +108,7 @@ def test_packing_visitor_basic_workflow(
 
 
 def test_packing_visitor_host_only_binaries_have_markers(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain
+    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
 ):
     """Test that host-only binaries have .rocm_kpack_ref markers."""
     input_tree = test_tree_with_bundled_binaries
@@ -101,6 +121,7 @@ def test_packing_visitor_host_only_binaries_have_markers(
         gfx_arch_family="gfx100X",
         gfx_arches=["gfx1100", "gfx1101"],
         toolchain=toolchain,
+        executor=executor,
     )
 
     registry = RecognizerRegistry()
@@ -131,7 +152,7 @@ def test_packing_visitor_host_only_binaries_have_markers(
 
 
 def test_packing_visitor_removes_hip_fatbin_section(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain
+    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
 ):
     """Test that .hip_fatbin section is removed from host-only binaries."""
     input_tree = test_tree_with_bundled_binaries
@@ -144,6 +165,7 @@ def test_packing_visitor_removes_hip_fatbin_section(
         gfx_arch_family="gfx1100",
         gfx_arches=["gfx1100"],
         toolchain=toolchain,
+        executor=executor,
     )
 
     registry = RecognizerRegistry()
@@ -172,7 +194,7 @@ def test_packing_visitor_removes_hip_fatbin_section(
 
 
 def test_packing_visitor_kpack_contains_kernels(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain
+    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
 ):
     """Test that .kpack file contains extracted kernels."""
     input_tree = test_tree_with_bundled_binaries
@@ -185,6 +207,7 @@ def test_packing_visitor_kpack_contains_kernels(
         gfx_arch_family="gfx1100",
         gfx_arches=["gfx1100", "gfx1101"],
         toolchain=toolchain,
+        executor=executor,
     )
 
     registry = RecognizerRegistry()
@@ -217,7 +240,7 @@ def test_packing_visitor_kpack_contains_kernels(
 
 
 def test_packing_visitor_statistics(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain
+    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
 ):
     """Test visitor statistics tracking."""
     input_tree = test_tree_with_bundled_binaries
@@ -230,6 +253,7 @@ def test_packing_visitor_statistics(
         gfx_arch_family="gfx1100",
         gfx_arches=["gfx1100"],
         toolchain=toolchain,
+        executor=executor,
     )
 
     registry = RecognizerRegistry()
@@ -246,7 +270,7 @@ def test_packing_visitor_statistics(
     assert stats["kernel_databases"] == 0
 
 
-def test_packing_visitor_repr(tmp_path: Path, toolchain: Toolchain):
+def test_packing_visitor_repr(tmp_path: Path, toolchain: Toolchain, executor: Executor | None):
     """Test string representation."""
     visitor = PackingVisitor(
         output_root=tmp_path,
@@ -254,6 +278,7 @@ def test_packing_visitor_repr(tmp_path: Path, toolchain: Toolchain):
         gfx_arch_family="gfx100X",
         gfx_arches=["gfx1100", "gfx1101"],
         toolchain=toolchain,
+        executor=executor,
     )
 
     repr_str = repr(visitor)
@@ -263,7 +288,7 @@ def test_packing_visitor_repr(tmp_path: Path, toolchain: Toolchain):
 
 
 def test_packing_visitor_relative_path_from_subdirectory(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain
+    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
 ):
     """Test that kpack_search_paths use correct relative paths from subdirectories."""
     input_tree = test_tree_with_bundled_binaries
@@ -276,6 +301,7 @@ def test_packing_visitor_relative_path_from_subdirectory(
         gfx_arch_family="gfx1100",
         gfx_arches=["gfx1100"],
         toolchain=toolchain,
+        executor=executor,
     )
 
     registry = RecognizerRegistry()
@@ -298,7 +324,7 @@ def test_packing_visitor_relative_path_from_subdirectory(
     assert "../.kpack/test-gfx1100.kpack" in marker_lib["kpack_search_paths"]
 
 
-def test_packing_visitor_preserves_symlinks(tmp_path: Path, toolchain: Toolchain):
+def test_packing_visitor_preserves_symlinks(tmp_path: Path, toolchain: Toolchain, executor: Executor | None):
     """Test that symlinks are preserved rather than followed."""
     input_tree = tmp_path / "input"
     output_tree = tmp_path / "output"
@@ -323,6 +349,7 @@ def test_packing_visitor_preserves_symlinks(tmp_path: Path, toolchain: Toolchain
         gfx_arch_family="gfx1100",
         gfx_arches=["gfx1100"],
         toolchain=toolchain,
+        executor=executor,
     )
 
     registry = RecognizerRegistry()
@@ -351,3 +378,47 @@ def test_packing_visitor_preserves_symlinks(tmp_path: Path, toolchain: Toolchain
     # Verify no duplicate copies
     stats = visitor.get_stats()
     assert stats["opaque_files"] == 3  # 1 file + 2 symlinks
+
+
+def test_packing_visitor_with_compression(
+    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+):
+    """Test packing with compression enabled."""
+    input_tree = test_tree_with_bundled_binaries
+    output_tree = tmp_path / "output"
+    output_tree.mkdir()
+
+    # Create visitor with ZstdCompressor
+    visitor = PackingVisitor(
+        output_root=output_tree,
+        group_name="test",
+        gfx_arch_family="gfx1100",
+        gfx_arches=["gfx1100", "gfx1101"],
+        toolchain=toolchain,
+        executor=executor,
+    )
+
+    # Override the archive compressor
+    visitor.archive._compressor = ZstdCompressor(compression_level=3)
+
+    # Scan and process tree
+    registry = RecognizerRegistry()
+    scanner = ArtifactScanner(registry, toolchain=toolchain)
+    scanner.scan_tree(input_tree, visitor)
+    visitor.finalize()
+
+    # Read kpack file and verify kernels can be decompressed
+    kpack_file = output_tree / ".kpack" / "test-gfx1100.kpack"
+    archive = PackedKernelArchive.read(kpack_file)
+
+    # Verify compression scheme in TOC
+    assert archive._compressor.SCHEME_NAME == "zstd-per-kernel"
+
+    # Verify kernels can be decompressed
+    kernel_gfx1100 = archive.get_kernel("bin/test_kernel_multi.exe", "gfx1100")
+    assert kernel_gfx1100 is not None
+    assert len(kernel_gfx1100) > 0
+
+    kernel_gfx1101 = archive.get_kernel("bin/test_kernel_multi.exe", "gfx1101")
+    assert kernel_gfx1101 is not None
+    assert len(kernel_gfx1101) > 0
