@@ -8,6 +8,8 @@ from typing import Any
 
 import msgpack
 
+from rocm_kpack.elf_fat_device_neutralizer import neutralize_binary
+
 
 class BinaryType(Enum):
     """Type of bundled binary file."""
@@ -208,9 +210,12 @@ class BundledBinary:
                 ]
             )
         except subprocess.CalledProcessError as e:
+            # Include the actual stderr/stdout from objcopy
+            error_output = e.output.decode() if e.output else "(no output)"
             raise RuntimeError(
-                f"Failed to extract .hip_fatbin section from {self.file_path}: {e}"
-            )
+                f"Failed to extract .hip_fatbin section from {self.file_path}. "
+                f"objcopy exit code: {e.returncode}. Output: {error_output}"
+            ) from e
 
         return fatbin_path
 
@@ -359,7 +364,7 @@ class BundledBinary:
                     architectures.append(parts[-1])
         return architectures
 
-    def create_host_only(self, output_path: Path) -> None:
+    def create_host_only(self, output_path: Path, use_objcopy: bool = False) -> None:
         """Create a host-only version of the binary without GPU device code.
 
         Only supported for BUNDLED binaries (executables/libraries with .hip_fatbin).
@@ -367,6 +372,8 @@ class BundledBinary:
 
         Args:
             output_path: Path where host-only binary will be written
+            use_objcopy: If False (default), use ELF fat device neutralizer (reclaims space).
+                        If True, use objcopy (only removes headers, no space reclaimed).
 
         Raises:
             RuntimeError: If operation fails or called on STANDALONE binary
@@ -379,20 +386,25 @@ class BundledBinary:
             )
 
         # For BUNDLED binaries, remove .hip_fatbin section
-        try:
-            self.toolchain.exec(
-                [
-                    self.toolchain.objcopy,
-                    "--remove-section",
-                    ".hip_fatbin",
-                    self.file_path,
-                    output_path,
-                ]
-            )
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                f"Failed to remove .hip_fatbin section from {self.file_path}: {e}"
-            )
+        if use_objcopy:
+            # Use objcopy (only removes section headers, no space reclaimed)
+            try:
+                self.toolchain.exec(
+                    [
+                        self.toolchain.objcopy,
+                        "--remove-section",
+                        ".hip_fatbin",
+                        self.file_path,
+                        output_path,
+                    ]
+                )
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(
+                    f"Failed to remove .hip_fatbin section from {self.file_path}: {e}"
+                )
+        else:
+            # Use ELF fat device neutralizer (actually reclaims disk space)
+            neutralize_binary(self.file_path, output_path)
 
     def cleanup(self) -> None:
         """Clean up temporary files created during operations."""

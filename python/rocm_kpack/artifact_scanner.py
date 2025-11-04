@@ -340,63 +340,19 @@ class ArtifactScanner:
         if file_path.is_symlink():
             return False
 
-        # Quick extension filter: only check executables and shared libraries
-        # .exe for executables (used on both Linux and Windows in our assets)
-        # .so* for Linux shared libraries (including versioned like .so.5, .so.1.0)
-        # .dll for Windows shared libraries
-        # Also check files with no extension (Linux executables)
+        # Use file content introspection instead of extension checking.
+        # Check ELF magic bytes to determine if this is an ELF binary.
+        # This is more robust than extension checking and handles edge cases
+        # like renamed files or non-standard extensions.
         #
-        # TODO: Use file content introspection instead of extension checking.
-        # In the packaging world, we should inspect file contents (ELF/PE headers)
-        # to determine file type, not rely on extensions. Consider using a library
-        # like `python-magic` or parsing ELF headers directly. This would be more
-        # robust and handle edge cases like renamed files or non-standard extensions.
-        #
-        # Reference Implementation: ROCm/TheRock py_packaging.py
-        # https://github.com/ROCm/TheRock/blob/main/build_tools/_therock_utils/py_packaging.py
-        #
-        # TheRock uses a hybrid approach for binary detection:
-        # 1. Fast extension-based filtering for known types (.exe, .dll, .so)
-        # 2. Content-based detection using python-magic library (Linux/Unix only):
-        #    - Uses magic.from_file(path) to get file type description
-        #    - Regex matches against output:
-        #      * "ELF[^,]+executable," for executables
-        #      * "ELF[^,]+shared object," for shared libraries
-        # 3. Platform-specific handling:
-        #    - Linux/Unix: Full magic-based detection
-        #    - Windows: Extension-only (python-magic documented as "buggy/broken")
-        # 4. Edge cases handled:
-        #    - Symlinks detected first (return early)
-        #    - Directories filtered early
-        #    - GPU code objects (.hsaco/.co) handled specially
-        #
-        # Recommended migration path:
-        #   - Add python-magic dependency (conditional import for non-Windows)
-        #   - Implement _is_binary_file() using magic.from_file()
-        #   - Keep extension checking as fallback for Windows or magic failures
-        #   - For Windows PE/COFF: Consider llvm-objdump or pefile library
-        suffix = file_path.suffix.lower()
-        filename = file_path.name.lower()
-
-        # Check for shared libraries including versioned ones (.so, .so.5, .so.1.0, etc.)
-        has_so_extension = False
-        if ".so" in filename:
-            has_so_extension = True
-
-        # No extension files might be executables
-        has_no_ext = (suffix == "" and file_path.is_file())
-
-        # Determine if this file is a candidate for bundled binary detection
-        # Include .hip files (ROCm test executables with device code)
-        # TODO: Remove all suffix based scanning in favor of content based
-        # scanning per above.
-        is_candidate = (
-            suffix in {".exe", ".dll", ".hip"} or
-            has_so_extension or
-            has_no_ext
-        )
-
-        if not is_candidate:
+        # ELF magic: First 4 bytes are \x7fELF
+        try:
+            with open(file_path, "rb") as f:
+                magic = f.read(4)
+                if magic != b'\x7fELF':
+                    return False
+        except (OSError, IOError):
+            # Can't read file, skip
             return False
 
         # Check for .hip_fatbin ELF section using readelf
