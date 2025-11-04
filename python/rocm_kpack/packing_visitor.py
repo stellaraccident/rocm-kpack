@@ -51,7 +51,7 @@ class PackingVisitor(ArtifactVisitor):
         self.kpack_dir = output_root / ".kpack"
         self.kpack_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize streaming PackedKernelArchive
+        # Initialize PackedKernelArchive (in-memory mode)
         self.kpack_filename = PackedKernelArchive.compute_pack_filename(
             group_name, gfx_arch_family
         )
@@ -60,7 +60,6 @@ class PackingVisitor(ArtifactVisitor):
             group_name=group_name,
             gfx_arch_family=gfx_arch_family,
             gfx_arches=gfx_arches,
-            output_path=self.kpack_path,
         )
 
         # Track visited artifacts for reporting
@@ -123,11 +122,8 @@ class PackingVisitor(ArtifactVisitor):
                     # Add to kpack archive
                     # Use POSIX-style path as kernel name for consistency
                     kernel_name = artifact_path.relative_path.as_posix()
-                    self.archive.add_kernel(
-                        relative_path=kernel_name,
-                        gfx_arch=arch,
-                        hsaco_data=hsaco_data,
-                    )
+                    prepared = self.archive.prepare_kernel(kernel_name, arch, hsaco_data)
+                    self.archive.add_kernel(prepared)
 
         # Create host-only binary (without .hip_fatbin section)
         host_only_dest = self.output_root / artifact_path.relative_path
@@ -169,8 +165,9 @@ class PackingVisitor(ArtifactVisitor):
         # For now, just track visitation
 
     def finalize(self) -> None:
-        """Finalize packing by writing kpack TOC and closing archive."""
-        self.archive.finalize()
+        """Finalize packing by compressing kernels and writing kpack archive."""
+        self.archive.finalize_archive()
+        self.archive.write(self.kpack_path)
 
     def get_stats(self) -> dict[str, int]:
         """Get statistics about visited artifacts.

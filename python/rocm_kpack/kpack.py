@@ -7,8 +7,27 @@ This module provides the PackedKernelArchive class for creating and reading
 import struct
 from pathlib import Path
 from typing import Any
+from dataclasses import dataclass
 
 import msgpack
+
+from .compression import Compressor, CompressionInput, NoOpCompressor, create_compressor_from_toc
+
+
+@dataclass
+class PreparedKernel:
+    """Opaque result from prepare_kernel() - holds compressed/prepared kernel data.
+
+    This object can be created concurrently (via prepare_kernel) and then
+    added to the archive sequentially (via add_kernel with locking).
+    """
+
+    relative_path: str
+    gfx_arch: str
+    compression_input: CompressionInput
+    kernel_id: str  # For debugging
+    original_size: int
+    metadata: dict[str, Any] | None = None
 
 
 class PackedKernelArchive:
@@ -23,26 +42,45 @@ class PackedKernelArchive:
 
     [Padding to 64-byte boundary]
 
-    [Blob 0 @ 64-byte aligned offset]
-    [Padding]
-    [Blob 1 @ 64-byte aligned offset]
-    ...
+    [Blob data - format depends on compression scheme]
 
     [MessagePack TOC at TOC Offset]
     {
+      "format_version": 1,
       "group_name": "blas",
       "gfx_arch_family": "gfx100X",
       "gfx_arches": [...],
+      "compression_scheme": "none" | "zstd-per-kernel",
+
+      # Compression scheme-specific fields:
+      # For "none":
+      "blobs": [
+        {"offset": 64, "size": 7472},      # ordinal 0
+        {"offset": 7552, "size": 4928},    # ordinal 1
+        ...
+      ],
+
+      # For "zstd-per-kernel":
+      "zstd_offset": 64,
+      "zstd_size": 12345,
+
       "toc": {
         "bin/hipcc": {
           "gfx1030": {
             "type": "hsaco",
-            "offset": 64,      # offset from start of file
-            "size": 7472       # blob size in bytes
+            "ordinal": 0,           # index into compression blob/array
+            "original_size": 7472   # uncompressed size (optional)
           }
         }
       }
     }
+
+    Compression Design:
+    - compression_scheme at TOC level identifies compressor ("none", "zstd-per-kernel")
+    - Compressor-specific metadata stored at TOC level (blobs array, zstd_offset/size, etc.)
+    - Per-kernel TOC entries reference kernels by ordinal (0..num_kernels-1)
+    - Runtime initializes compressor from TOC once, then uses ordinals for O(1) lookups
+    - This allows efficient random access decompression with proper lookup tables
     """
 
     MAGIC = b"KPAK"
@@ -56,6 +94,7 @@ class PackedKernelArchive:
         gfx_arch_family: str,
         gfx_arches: list[str],
         output_path: Path | None = None,
+        compressor: Compressor | None = None,
     ):
         """Initialize a new packed kernel archive.
 
@@ -66,59 +105,50 @@ class PackedKernelArchive:
             output_path: If provided, enables streaming write mode where blobs are
                         written to disk immediately. Call finalize() when done.
                         If None, accumulates in memory until write() is called.
+                        Note: Streaming mode not yet supported.
+            compressor: Compressor for kernel data. If None, defaults to NoOpCompressor.
+                       All kernels are processed using map/reduce pattern.
+                       Must call finalize_archive() before write().
         """
         self.group_name = group_name
         self.gfx_arch_family = gfx_arch_family
         self.gfx_arches = gfx_arches
-        # TOC: binary_path -> gfx_arch -> entry (with offset/size)
+        # TOC: binary_path -> gfx_arch -> entry (with ordinal)
         self.toc: dict[str, dict[str, dict[str, Any]]] = {}
-
-        # In-memory mode: accumulate blobs (backward compatibility)
-        self.data: list[bytes] = []
-
-        # Streaming write mode
-        self._output_path: Path | None = output_path
-        self._file_handle: Any = None  # Open file handle for streaming writes
 
         # File path for read-mode archives
         self._file_path: Path | None = None
 
-        # Initialize streaming write mode if output_path provided
-        if output_path:
-            self._begin_streaming_write()
+        # Compression support - always use a compressor
+        if compressor is None:
+            compressor = NoOpCompressor()
 
-    def _begin_streaming_write(self) -> None:
-        """Initialize streaming write mode by opening file and writing header."""
-        assert self._output_path is not None
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._compressor: Compressor = compressor
+        self._compression_inputs: list[tuple[str, CompressionInput]] = []
+        self._compressed_blob: bytes | None = None
+        self._compression_metadata: dict[str, Any] | None = None
+        self._archive_finalized: bool = False
+        self._kernel_ordinal_counter: int = 0  # Next ordinal to assign
 
-        self._file_handle = self._output_path.open("wb")
+        # Streaming write mode not yet supported
+        if output_path is not None:
+            raise ValueError(
+                "Streaming write mode not yet supported. "
+                "Use in-memory mode (output_path=None) and call write(path) when done."
+            )
 
-        # Write header with placeholder TOC offset
-        header = struct.pack(
-            "<4sIQ",  # little-endian: 4-byte string, uint32, uint64
-            self.MAGIC,
-            self.FORMAT_VERSION,
-            0,  # TOC offset placeholder
-        )
-        self._file_handle.write(header)
-
-        # Pad to first blob alignment boundary
-        current_pos = self._file_handle.tell()
-        padding = (self.BLOB_ALIGNMENT - (current_pos % self.BLOB_ALIGNMENT)) % self.BLOB_ALIGNMENT
-        self._file_handle.write(b"\x00" * padding)
-
-    def add_kernel(
+    def prepare_kernel(
         self,
         relative_path: str,
         gfx_arch: str,
         hsaco_data: bytes,
         metadata: dict[str, Any] | None = None,
-    ) -> None:
-        """Add a kernel to the archive.
+    ) -> PreparedKernel:
+        """Prepare a kernel for addition to the archive (concurrent-safe).
 
-        In streaming mode (output_path provided to constructor), writes blob
-        immediately to disk. Otherwise accumulates in memory.
+        This method can be called concurrently from multiple threads to prepare
+        kernels in parallel. The actual addition to the archive (TOC manipulation)
+        is done later via add_kernel() which requires locking.
 
         Args:
             relative_path: Path to binary relative to install tree root
@@ -126,11 +156,47 @@ class PackedKernelArchive:
             hsaco_data: Raw HSACO kernel data
             metadata: Optional metadata dictionary for extensibility
 
-        Raises:
-            ValueError: If kernel already exists for (relative_path, gfx_arch)
+        Returns:
+            PreparedKernel object to pass to add_kernel()
         """
         # Normalize path to use forward slashes (replace backslashes)
         relative_path = relative_path.replace("\\", "/")
+
+        # Generate unique kernel ID for debugging
+        kernel_id = f"{relative_path}@{gfx_arch}"
+
+        # Compress/prepare kernel (map phase - concurrent-safe)
+        compression_input = self._compressor.prepare_kernel(hsaco_data, kernel_id)
+
+        return PreparedKernel(
+            relative_path=relative_path,
+            gfx_arch=gfx_arch,
+            compression_input=compression_input,
+            kernel_id=kernel_id,
+            original_size=len(hsaco_data),
+            metadata=metadata,
+        )
+
+    def add_kernel(self, prepared: PreparedKernel) -> None:
+        """Add a kernel to the archive (cheap metadata manipulation - lock this).
+
+        Call prepare_kernel() first to create the PreparedKernel, which separates
+        concurrent kernel preparation from sequential TOC manipulation for better
+        parallelism.
+
+        Args:
+            prepared: PreparedKernel from prepare_kernel()
+
+        Raises:
+            ValueError: If kernel already exists for (relative_path, gfx_arch)
+        """
+        # Extract fields from PreparedKernel
+        relative_path = prepared.relative_path
+        gfx_arch = prepared.gfx_arch
+        compression_input = prepared.compression_input
+        kernel_id = prepared.kernel_id
+        original_size = prepared.original_size
+        metadata = prepared.metadata
 
         # Check for duplicates
         if relative_path in self.toc:
@@ -139,47 +205,56 @@ class PackedKernelArchive:
                     f"Kernel already exists for {relative_path} @ {gfx_arch}"
                 )
 
-        # Add to TOC
+        # Add to TOC (cheap metadata manipulation)
         if relative_path not in self.toc:
             self.toc[relative_path] = {}
 
         entry = {
             "type": "hsaco",
+            "ordinal": self._kernel_ordinal_counter,
+            "original_size": original_size,
         }
         if metadata:
             entry["metadata"] = metadata
 
-        # Streaming mode: write blob to disk immediately
-        if self._file_handle is not None:
-            offset = self._file_handle.tell()
-            self._file_handle.write(hsaco_data)
-
-            # Update TOC with offset and size
-            entry["offset"] = offset
-            entry["size"] = len(hsaco_data)
-
-            # Pad to next alignment boundary
-            current_pos = self._file_handle.tell()
-            padding = (self.BLOB_ALIGNMENT - (current_pos % self.BLOB_ALIGNMENT)) % self.BLOB_ALIGNMENT
-            self._file_handle.write(b"\x00" * padding)
-        else:
-            # In-memory mode: accumulate in data array with ordinal
-            ordinal = len(self.data)
-            self.data.append(hsaco_data)
-            entry["ordinal"] = ordinal
+        # Store compression input for finalize
+        self._compression_inputs.append((kernel_id, compression_input))
+        self._kernel_ordinal_counter += 1
 
         self.toc[relative_path][gfx_arch] = entry
 
-    def write(self, output_path: Path) -> None:
-        """Write the packed archive to a file (in-memory mode only).
+    def finalize_archive(self) -> None:
+        """Finalize archive by running reduce phase.
 
-        This method is for backward compatibility when output_path is not
-        provided to constructor. For streaming mode, use finalize() instead.
+        This must be called after all kernels are added but before write().
+        This is the "reduce" phase that performs cross-kernel optimization
+        (compression, deduplication, etc.) and produces the final blob(s).
+
+        Raises:
+            RuntimeError: If already finalized
+        """
+        if self._archive_finalized:
+            raise RuntimeError("Archive already finalized")
+
+        # Run reduce phase: finalize all compression inputs
+        # Returns (blob_data, toc_metadata)
+        self._compressed_blob, self._compression_metadata = self._compressor.finalize(
+            self._compression_inputs
+        )
+        self._archive_finalized = True
+
+        # Clear compression inputs to free memory
+        self._compression_inputs.clear()
+
+    def write(self, output_path: Path) -> None:
+        """Write the packed archive to a file.
+
+        Must call finalize_archive() before calling this method.
 
         Format:
         1. Write fixed header (magic, version, toc_offset placeholder)
         2. Pad to BLOB_ALIGNMENT boundary
-        3. Write each blob aligned to BLOB_ALIGNMENT, tracking offsets
+        3. Write compressed blob
         4. Write MessagePack TOC at end
         5. Seek back and update header with TOC offset
 
@@ -187,11 +262,11 @@ class PackedKernelArchive:
             output_path: Path where .kpack file will be written
 
         Raises:
-            RuntimeError: If called in streaming mode (use finalize() instead)
+            RuntimeError: If archive not finalized
         """
-        if self._file_handle is not None:
+        if not self._archive_finalized:
             raise RuntimeError(
-                "Cannot call write() in streaming mode. Use finalize() instead."
+                "Archive not finalized. Call finalize_archive() first."
             )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,26 +286,24 @@ class PackedKernelArchive:
             padding = (self.BLOB_ALIGNMENT - (current_pos % self.BLOB_ALIGNMENT)) % self.BLOB_ALIGNMENT
             f.write(b"\x00" * padding)
 
-            # Write blobs and update TOC with offsets
-            for relative_path, arches in self.toc.items():
-                for gfx_arch, entry in arches.items():
-                    ordinal = entry["ordinal"]
-                    blob_data = self.data[ordinal]
+            # Write compressed blob
+            blob_start_offset = f.tell()
+            f.write(self._compressed_blob)
 
-                    # Record offset before writing
-                    offset = f.tell()
-                    f.write(blob_data)
+            # Build TOC with compression metadata
+            compression_scheme = self._compressor.SCHEME_NAME
+            toc_metadata = {"compression_scheme": compression_scheme}
 
-                    # Update TOC entry with offset and size
-                    entry["offset"] = offset
-                    entry["size"] = len(blob_data)
-                    # Remove ordinal from TOC (no longer needed)
-                    del entry["ordinal"]
+            # Add compression-specific metadata (blobs array or zstd_offset/size)
+            toc_metadata.update(self._compression_metadata)
 
-                    # Pad to next alignment boundary
-                    current_pos = f.tell()
-                    padding = (self.BLOB_ALIGNMENT - (current_pos % self.BLOB_ALIGNMENT)) % self.BLOB_ALIGNMENT
-                    f.write(b"\x00" * padding)
+            # For schemes that use offsets, fix up the placeholder offsets
+            if compression_scheme == "zstd-per-kernel":
+                toc_metadata["zstd_offset"] = blob_start_offset
+            elif compression_scheme == "none":
+                # Fix up blob offsets to be absolute file offsets
+                for blob in toc_metadata["blobs"]:
+                    blob["offset"] += blob_start_offset
 
             # Write MessagePack TOC
             toc_offset = f.tell()
@@ -240,6 +313,7 @@ class PackedKernelArchive:
                 "gfx_arch_family": self.gfx_arch_family,
                 "gfx_arches": self.gfx_arches,
                 "toc": self.toc,
+                **toc_metadata,
             }
             msgpack.pack(toc_data, f, use_bin_type=True)
 
@@ -247,43 +321,12 @@ class PackedKernelArchive:
             f.seek(8)  # Skip magic (4 bytes) and version (4 bytes)
             f.write(struct.pack("<Q", toc_offset))
 
-    def finalize(self) -> None:
-        """Finalize streaming write by writing TOC and closing file.
-
-        Only valid in streaming mode (when output_path provided to constructor).
-
-        Raises:
-            RuntimeError: If not in streaming mode
-        """
-        if self._file_handle is None:
-            raise RuntimeError(
-                "Not in streaming mode. Use write(output_path) for in-memory mode."
-            )
-
-        # Write MessagePack TOC
-        toc_offset = self._file_handle.tell()
-        toc_data = {
-            "format_version": self.FORMAT_VERSION,
-            "group_name": self.group_name,
-            "gfx_arch_family": self.gfx_arch_family,
-            "gfx_arches": self.gfx_arches,
-            "toc": self.toc,
-        }
-        msgpack.pack(toc_data, self._file_handle, use_bin_type=True)
-
-        # Backpatch header with TOC offset
-        self._file_handle.seek(8)  # Skip magic (4 bytes) and version (4 bytes)
-        self._file_handle.write(struct.pack("<Q", toc_offset))
-
-        # Close file
-        self._file_handle.close()
-        self._file_handle = None
-
     @staticmethod
     def read(input_path: Path) -> "PackedKernelArchive":
         """Read a packed archive from a file.
 
         Reads the binary header, seeks to the TOC, and loads metadata.
+        Automatically creates the appropriate compressor from the TOC.
         Kernel data remains in the file and is accessed on-demand.
 
         Args:
@@ -293,7 +336,8 @@ class PackedKernelArchive:
             PackedKernelArchive instance loaded from file
 
         Raises:
-            ValueError: If magic number or format version is invalid
+            ValueError: If magic number, format version is invalid, or
+                       compression scheme is unknown
         """
         with input_path.open("rb") as f:
             # Read and validate header
@@ -323,17 +367,23 @@ class PackedKernelArchive:
         archive.toc = toc_data["toc"]
         archive._file_path = input_path
 
+        # Initialize compressor from TOC
+        archive._compressor = create_compressor_from_toc(toc_data, input_path)
+        archive._archive_finalized = True
+
         return archive
 
     def get_kernel(self, relative_path: str, gfx_arch: str) -> bytes | None:
         """Retrieve kernel data for a specific binary and architecture.
+
+        Automatically decompresses using the configured compressor.
 
         Args:
             relative_path: Path to binary relative to install tree root
             gfx_arch: GPU architecture
 
         Returns:
-            Kernel data bytes, or None if not found
+            Kernel data bytes (decompressed), or None if not found
         """
         # Normalize path to use forward slashes (replace backslashes)
         relative_path = relative_path.replace("\\", "/")
@@ -344,25 +394,16 @@ class PackedKernelArchive:
             return None
 
         entry = self.toc[relative_path][gfx_arch]
+        ordinal = entry["ordinal"]
 
-        # Building mode: use ordinal to access in-memory data array
-        if "ordinal" in entry:
-            ordinal = entry["ordinal"]
-            return self.data[ordinal]
+        # Read mode: decompress using ordinal
+        if self._archive_finalized:
+            return self._compressor.decompress_kernel(ordinal)
 
-        # Read mode: use offset/size to read from file
-        if self._file_path is None:
-            raise RuntimeError(
-                "Archive is in read mode but no file path is set. "
-                "This should not happen - file may have been written but not properly loaded."
-            )
-
-        offset = entry["offset"]
-        size = entry["size"]
-
-        with self._file_path.open("rb") as f:
-            f.seek(offset)
-            return f.read(size)
+        # Building mode: this shouldn't happen - archive must be finalized before reading
+        raise RuntimeError(
+            "Cannot get_kernel() before archive is finalized. Call finalize_archive() first."
+        )
 
     @staticmethod
     def compute_pack_filename(group_name: str, gfx_arch_family: str) -> str:
