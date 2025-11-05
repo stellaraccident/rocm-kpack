@@ -1,2 +1,22 @@
 __pycache__
 *.egg-info
+
+# Build directories
+build/
+*.o
+*.so
+*.a
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Compiled executables
+*.exe
+standalone
+client
+
+# Unbundled output
+*.unbundled/
