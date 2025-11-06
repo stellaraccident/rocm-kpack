@@ -16,8 +16,11 @@ TODO: Windows PE/COFF support will require similar approach with different binar
 
 import os
 import struct
+import sys
 from pathlib import Path
 from typing import NamedTuple
+
+from . import elf_zero_pages
 
 
 class ElfHeader(NamedTuple):
@@ -557,9 +560,98 @@ class ElfFatDeviceNeutralizer:
             print(f"  Updated {updated_count} GOT entries")
 
 
+def _rewrite_hipfatbin_magic(data: bytearray, *, verbose: bool = False) -> bool:
+    """
+    Rewrite .hipFatBinSegment magic from HIPF to HIPK.
+
+    The .hipFatBinSegment section contains a __CudaFatBinaryWrapper structure:
+      Offset 0: magic (4 bytes) - 0x48495046 (HIPF) or 0x4B504948 (HIPK)
+      Offset 4: version (4 bytes) - must be 1
+      Offset 8: binary pointer (8 bytes) - points to device code
+      Offset 16: dummy1 (8 bytes) - unused
+
+    For kpack'd binaries, we change:
+      - magic from HIPF to HIPK
+      - binary pointer to NULL (since device code is externalized)
+
+    Args:
+        data: The ELF binary data to modify in-place
+        verbose: If True, print detailed information
+
+    Returns:
+        True if magic was rewritten, False if section not found or already HIPK
+    """
+    # Magic constants (x86-64 is little-endian, so bytes are reversed)
+    HIPF_MAGIC = 0x48495046  # "HIPF" - normal fat binary
+    HIPK_MAGIC = 0x4B504948  # "HIPK" - kpack'd binary
+
+    # Parse ELF header to find sections
+    try:
+        ehdr = elf_zero_pages.read_elf_header(data)
+    except ValueError as e:
+        raise RuntimeError(f"Failed to parse ELF header: {e}") from e
+
+    # Find .hipFatBinSegment section
+    shstrtab_shdr = elf_zero_pages.read_section_header(data, ehdr.e_shoff + ehdr.e_shstrndx * 64)
+    shstrtab_offset = shstrtab_shdr.sh_offset
+
+    hipfatbin_segment_shdr = None
+    for i in range(ehdr.e_shnum):
+        shdr = elf_zero_pages.read_section_header(data, ehdr.e_shoff + i * 64)
+        name_offset = shstrtab_offset + shdr.sh_name
+        name_end = data.find(b'\x00', name_offset)
+        name = data[name_offset:name_end].decode('utf-8')
+
+        if name == '.hipFatBinSegment':
+            hipfatbin_segment_shdr = shdr
+            break
+
+    if hipfatbin_segment_shdr is None:
+        raise RuntimeError(
+            "Failed to find .hipFatBinSegment section. "
+            "This binary may not be a valid HIP fat binary."
+        )
+
+    # Read current magic at offset 0 of the section
+    section_offset = hipfatbin_segment_shdr.sh_offset
+    current_magic = struct.unpack_from('<I', data, section_offset)[0]
+
+    if current_magic == HIPK_MAGIC:
+        if verbose:
+            print(f"  INFO: Magic already set to HIPK (0x{HIPK_MAGIC:08x})")
+        return False  # Already converted
+
+    if current_magic != HIPF_MAGIC:
+        raise RuntimeError(
+            f"Unexpected magic in .hipFatBinSegment: 0x{current_magic:08x}. "
+            f"Expected HIPF (0x{HIPF_MAGIC:08x}) for fat binary. "
+            f"Binary may be corrupted or not a valid HIP fat binary."
+        )
+
+    if verbose:
+        print(f"\n  Rewriting .hipFatBinSegment magic:")
+        print(f"    Section offset: 0x{section_offset:x}")
+        print(f"    Current magic: 0x{current_magic:08x} (HIPF)")
+        print(f"    New magic:     0x{HIPK_MAGIC:08x} (HIPK)")
+
+    # Rewrite magic from HIPF to HIPK
+    struct.pack_into('<I', data, section_offset, HIPK_MAGIC)
+
+    # Zero out the binary pointer (offset 8, 8 bytes)
+    # This is safe because device code has been removed
+    struct.pack_into('<Q', data, section_offset + 8, 0)
+
+    if verbose:
+        print(f"    Zeroed binary pointer at offset 0x{section_offset + 8:x}")
+
+    return True
+
+
 def neutralize_binary(input_path: Path, output_path: Path, *, verbose: bool = False) -> dict:
     """
-    Neutralize an ELF fat binary by removing .hip_fatbin section.
+    Neutralize an ELF fat binary using two-phase approach:
+    1. Zero-page optimization (removes .hip_fatbin content, reorganizes ELF)
+    2. Magic number rewriting (HIPF -> HIPK for runtime detection)
 
     Args:
         input_path: Path to original fat binary
@@ -569,6 +661,7 @@ def neutralize_binary(input_path: Path, output_path: Path, *, verbose: bool = Fa
     Returns:
         Dictionary with statistics about the neutralization
     """
+    # Check if input has .hip_fatbin section
     neutralizer = ElfFatDeviceNeutralizer(input_path)
 
     if not neutralizer.has_hip_fatbin():
@@ -578,4 +671,63 @@ def neutralize_binary(input_path: Path, output_path: Path, *, verbose: bool = Fa
         os.chmod(output_path, neutralizer.original_mode)
         return {'removed': 0, 'original_size': len(neutralizer.data), 'new_size': len(neutralizer.data)}
 
-    return neutralizer.rebuild(output_path, verbose=verbose)
+    original_size = len(neutralizer.data)
+
+    # Phase 1: Apply zero-page optimization to remove device code
+    if verbose:
+        print(f"\nPhase 1: Zero-page optimization")
+
+    temp_zeropaged = output_path.with_suffix(output_path.suffix + '.zeropaged')
+    try:
+        success = elf_zero_pages.conservative_zero_page(
+            input_path,
+            temp_zeropaged,
+            section_name=".hip_fatbin",
+            verbose=verbose
+        )
+
+        if not success:
+            raise RuntimeError(
+                "Zero-page optimization failed. "
+                "Binary may have insufficient space for program headers or other structural issues."
+            )
+
+        # Phase 2: Apply magic number rewriting
+        if verbose:
+            print(f"\nPhase 2: Magic number rewriting (HIPF -> HIPK)")
+
+        data = bytearray(temp_zeropaged.read_bytes())
+        magic_rewritten = _rewrite_hipfatbin_magic(data, verbose=verbose)
+
+        if not magic_rewritten:
+            raise RuntimeError(
+                "Failed to rewrite magic number. "
+                "Binary may already be neutralized (HIPK magic) or .hipFatBinSegment section is missing."
+            )
+
+        # Write final output
+        output_path.write_bytes(data)
+
+        # Preserve original permissions
+        os.chmod(output_path, neutralizer.original_mode)
+
+        final_size = len(data)
+        removed = original_size - final_size
+
+        if verbose:
+            print(f"\nNeutralization complete:")
+            print(f"  Original size: {original_size:,} bytes")
+            print(f"  Final size:    {final_size:,} bytes")
+            print(f"  Removed:       {removed:,} bytes ({100 * removed / original_size:.1f}%)")
+
+        return {
+            'removed': removed,
+            'original_size': original_size,
+            'new_size': final_size,
+            'magic_rewritten': magic_rewritten
+        }
+
+    finally:
+        # Clean up temporary file
+        if temp_zeropaged.exists():
+            temp_zeropaged.unlink()

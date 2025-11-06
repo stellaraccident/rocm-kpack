@@ -55,8 +55,9 @@ class Elf64_Shdr(NamedTuple):
 
 # ELF constants
 PT_LOAD = 1
-PT_GNU_STACK = 0x6474e551
 PT_NOTE = 4
+PT_PHDR = 6
+PT_GNU_STACK = 0x6474e551
 SHT_NOBITS = 8
 
 
@@ -148,12 +149,20 @@ def conservative_zero_page(
     input_path: Path,
     output_path: Path,
     section_name: str = ".hip_fatbin",
-    verbose: bool = True
+    verbose: bool = True,
+    force_overflow: bool = False
 ) -> bool:
     """
     Apply conservative zero-page optimization to a section.
 
     Only zero-pages fully page-aligned regions. Preserves unaligned content.
+
+    Args:
+        input_path: Input ELF binary
+        output_path: Output ELF binary
+        section_name: Section to zero-page (default: .hip_fatbin)
+        verbose: Print progress information
+        force_overflow: Test mode - artificially reduce available space to force overflow
     """
 
     # Read input
@@ -352,12 +361,149 @@ def conservative_zero_page(
     if verbose:
         print(f"\nProgram headers: {ehdr.e_phnum} -> {len(new_phdrs)}")
 
-    # Write new program headers
-    for i, phdr in enumerate(new_phdrs):
-        write_program_header(new_data, ehdr.e_phoff + i * 56, phdr)
+    # Check if new program header table will overflow
+    old_phdr_size = ehdr.e_phnum * 56
+    new_phdr_size = len(new_phdrs) * 56
 
-    # Update ELF header
-    struct.pack_into('<H', new_data, 56, len(new_phdrs))
+    # Find the minimum offset of any content after the program header table
+    # (sections, segments, interpreter string, etc.)
+    min_content_offset = len(new_data)
+    for i in range(ehdr.e_shnum):
+        shdr = read_section_header(data, ehdr.e_shoff + i * 64)
+        if shdr.sh_offset > ehdr.e_phoff + old_phdr_size:
+            min_content_offset = min(min_content_offset, shdr.sh_offset)
+
+    available_space = min_content_offset - ehdr.e_phoff
+
+    # Test mode: artificially reduce available space to force overflow handling
+    if force_overflow:
+        available_space = new_phdr_size - 1
+        if verbose:
+            print(f"  [TEST MODE] Forcing overflow: available={available_space}, need={new_phdr_size}")
+
+    if new_phdr_size > available_space:
+        # Relocate program header table to end of file to avoid overwriting content
+        new_phoff = len(new_data)
+
+        if verbose:
+            print(f"  Relocating program headers to end of file (insufficient space at offset {ehdr.e_phoff})")
+            print(f"  Old size: {old_phdr_size} bytes, new size: {new_phdr_size} bytes")
+            print(f"  Available space: {available_space} bytes, need: {new_phdr_size} bytes")
+            print(f"  New program header offset: 0x{new_phoff:x}")
+
+        # Find a suitable virtual address for the relocated program headers
+        # Place them after all existing segments
+        max_vaddr_end = 0
+        for phdr in new_phdrs:
+            if phdr.p_type == PT_LOAD:
+                vaddr_end = phdr.p_vaddr + phdr.p_memsz
+                max_vaddr_end = max(max_vaddr_end, vaddr_end)
+
+        # Align to page boundary for the new segment
+        phdr_vaddr = round_up_to_page(max_vaddr_end)
+
+        if verbose:
+            print(f"  Placing relocated headers at vaddr 0x{phdr_vaddr:x}")
+
+        # CRITICAL: Ensure file offset and vaddr have same page-aligned remainder
+        # The kernel requires: (p_offset % PAGE_SIZE) == (p_vaddr % PAGE_SIZE)
+        # for all PT_LOAD segments, otherwise mmap will fail
+        vaddr_remainder = phdr_vaddr % PAGE_SIZE  # Should be 0 (page-aligned)
+        offset_remainder = new_phoff % PAGE_SIZE
+
+        if offset_remainder != vaddr_remainder:
+            # Add padding to align file offset with vaddr's page remainder
+            padding_needed = (vaddr_remainder - offset_remainder + PAGE_SIZE) % PAGE_SIZE
+            if verbose:
+                print(f"  Adding {padding_needed} bytes padding for mmap alignment")
+                print(f"    File offset: 0x{new_phoff:x} (remainder 0x{offset_remainder:x})")
+                print(f"    Target vaddr: 0x{phdr_vaddr:x} (remainder 0x{vaddr_remainder:x})")
+
+            # Pad the file
+            new_data.extend(b'\x00' * padding_needed)
+            new_phoff = len(new_data)
+
+            if verbose:
+                print(f"    Aligned offset: 0x{new_phoff:x}")
+
+        # Update PT_PHDR to point to the new location
+        phdr_updated = False
+
+        for i, phdr in enumerate(new_phdrs):
+            if phdr.p_type == PT_PHDR:
+                # Update PT_PHDR to point to new location
+                new_phdrs[i] = Elf64_Phdr(
+                    PT_PHDR, phdr.p_flags,
+                    new_phoff,      # file offset
+                    phdr_vaddr,     # virtual address
+                    phdr_vaddr,     # physical address
+                    new_phdr_size,  # file size
+                    new_phdr_size,  # memory size
+                    phdr.p_align
+                )
+                phdr_updated = True
+                if verbose:
+                    print(f"  Updated PT_PHDR: vaddr=0x{phdr_vaddr:x}, offset=0x{new_phoff:x}")
+                break
+
+        # Add a PT_LOAD segment for the relocated program headers
+        # This ensures they get loaded into memory
+        # Note: We need to calculate the final size including this PT_LOAD
+        final_phdr_count = len(new_phdrs) + 1  # +1 for the PT_LOAD we're adding
+        final_phdr_size = final_phdr_count * 56
+
+        phdr_load = Elf64_Phdr(
+            PT_LOAD,
+            4,  # PF_R (read-only)
+            new_phoff,      # file offset
+            phdr_vaddr,     # virtual address
+            phdr_vaddr,     # physical address
+            final_phdr_size,  # file size - must include this PT_LOAD itself!
+            final_phdr_size,  # memory size
+            0x1000          # page alignment
+        )
+        new_phdrs.append(phdr_load)
+
+        if verbose:
+            print(f"  Added PT_LOAD for relocated headers (final size: {final_phdr_size} bytes)")
+
+        # Also update PT_PHDR with the correct size
+        for i, phdr in enumerate(new_phdrs):
+            if phdr.p_type == PT_PHDR:
+                new_phdrs[i] = Elf64_Phdr(
+                    PT_PHDR, phdr.p_flags,
+                    new_phoff,      # file offset
+                    phdr_vaddr,     # virtual address
+                    phdr_vaddr,     # physical address
+                    final_phdr_size,  # correct size
+                    final_phdr_size,  # correct size
+                    phdr.p_align
+                )
+                break
+
+        # Append program headers to end of file
+        for phdr in new_phdrs:
+            phdr_bytes = struct.pack('<IIQQQQQQ',
+                phdr.p_type, phdr.p_flags, phdr.p_offset,
+                phdr.p_vaddr, phdr.p_paddr, phdr.p_filesz,
+                phdr.p_memsz, phdr.p_align)
+            new_data.extend(phdr_bytes)
+
+        # Update e_phoff in ELF header
+        struct.pack_into('<Q', new_data, 32, new_phoff)
+
+        # Update e_phnum in ELF header
+        struct.pack_into('<H', new_data, 56, len(new_phdrs))
+    else:
+        # Write program headers in place
+        if verbose:
+            print(f"  Writing program headers in place (sufficient space)")
+
+        for i, phdr in enumerate(new_phdrs):
+            write_program_header(new_data, ehdr.e_phoff + i * 56, phdr)
+
+        # Update e_phnum in ELF header
+        struct.pack_into('<H', new_data, 56, len(new_phdrs))
 
     # Update section header table offset
     new_shoff = ehdr.e_shoff - aligned_size if ehdr.e_shoff > aligned_offset else ehdr.e_shoff

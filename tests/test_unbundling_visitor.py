@@ -187,7 +187,7 @@ def test_unbundling_visitor_unbundles_binaries(bundled_test_tree: Path, tmp_path
     assert (output_dir / "bins" / "libtest_kernel_single.so").exists()
 
     # Verify host-only versions don't have active .hip_fatbin section
-    # The neutralizer marks it as NULL type, so check for that
+    # The neutralizer marks it as NOBITS (zero-paged), so check for that
     import subprocess
     result = subprocess.run(
         ["readelf", "-S", str(output_dir / "bins" / "test_kernel_multi.exe")],
@@ -195,12 +195,12 @@ def test_unbundling_visitor_unbundles_binaries(bundled_test_tree: Path, tmp_path
         text=True,
         check=True
     )
-    # Either .hip_fatbin is absent, or it's marked as NULL type
+    # Either .hip_fatbin is absent, or it's marked as NOBITS (neutralized)
     if ".hip_fatbin" in result.stdout:
-        # If present, verify it's marked as NULL type (neutralized)
+        # If present, verify it's marked as NOBITS (zero-paged/neutralized)
         for line in result.stdout.split('\n'):
             if '.hip_fatbin' in line:
-                assert 'NULL' in line, "If .hip_fatbin exists, it should be type NULL (neutralized)"
+                assert 'NOBITS' in line, "If .hip_fatbin exists, it should be type NOBITS (neutralized)"
                 break
 
 
