@@ -75,6 +75,45 @@ SHT_NOBITS = 8
 
 SHF_ALLOC = 0x2
 
+# Dynamic section tags that contain virtual addresses
+DT_NULL = 0
+DT_PLTGOT = 3
+DT_HASH = 4
+DT_STRTAB = 5
+DT_SYMTAB = 6
+DT_RELA = 7
+DT_INIT = 12
+DT_FINI = 13
+DT_REL = 17
+DT_JMPREL = 23
+DT_INIT_ARRAY = 25
+DT_FINI_ARRAY = 26
+DT_PREINIT_ARRAY = 32
+DT_SYMTAB_SHNDX = 34
+DT_VERSYM = 0x6ffffff0
+DT_VERDEF = 0x6ffffffc
+DT_VERNEED = 0x6ffffffe
+
+# Tags that contain addresses (not sizes or other values)
+DT_ADDR_TAGS = {
+    DT_PLTGOT,
+    DT_HASH,
+    DT_STRTAB,
+    DT_SYMTAB,
+    DT_RELA,
+    DT_INIT,
+    DT_FINI,
+    DT_REL,
+    DT_JMPREL,
+    DT_INIT_ARRAY,
+    DT_FINI_ARRAY,
+    DT_PREINIT_ARRAY,
+    DT_SYMTAB_SHNDX,
+    DT_VERSYM,
+    DT_VERDEF,
+    DT_VERNEED,
+}
+
 
 class ElfFatDeviceNeutralizer:
     """Neutralizes ELF fat binaries by removing .hip_fatbin section and reclaiming space."""
@@ -253,6 +292,9 @@ class ElfFatDeviceNeutralizer:
         self._update_elf_header(new_data, plan)
         self._update_program_headers(new_data, plan, verbose=verbose)
         self._update_section_headers(new_data, plan, verbose=verbose)
+        self._update_dynamic_section(new_data, plan, verbose=verbose)
+        self._update_relocations(new_data, plan, verbose=verbose)
+        self._update_got_sections(new_data, plan, verbose=verbose)
 
         # Write to output
         output_path.write_bytes(new_data)
@@ -269,7 +311,13 @@ class ElfFatDeviceNeutralizer:
     def _update_elf_header(self, data: bytearray, plan: dict):
         """Update ELF header in rebuilt file"""
         removal_size = plan['removal_size']
+        removal_vaddr = plan['removal_vaddr']
         ehdr = self.elf_header
+
+        # If entry point comes after .hip_fatbin in virtual address space, shift it
+        if ehdr.e_entry >= removal_vaddr:
+            new_entry = ehdr.e_entry - removal_size
+            struct.pack_into('<Q', data, 24, new_entry)
 
         # If section header table comes after .hip_fatbin, shift it
         new_shoff = ehdr.e_shoff
@@ -343,6 +391,170 @@ class ElfFatDeviceNeutralizer:
                 if verbose:
                     section_name = self.section_names.get(idx, f"section_{idx}")
                     print(f"  Shifted {section_name}: offset 0x{shdr.sh_offset:x} -> 0x{new_offset:x}")
+
+    def _update_dynamic_section(self, data: bytearray, plan: dict, *, verbose: bool = False):
+        """Update dynamic section entries that contain virtual addresses"""
+        removal_size = plan['removal_size']
+        removal_vaddr = plan['removal_vaddr']
+
+        # Find PT_DYNAMIC segment
+        dynamic_phdr = None
+        dynamic_phdr_idx = None
+        for idx, phdr in enumerate(self.program_headers):
+            if phdr.p_type == PT_DYNAMIC:
+                dynamic_phdr = phdr
+                dynamic_phdr_idx = idx
+                break
+
+        if not dynamic_phdr:
+            # No dynamic section to update
+            return
+
+        # Calculate the new offset for the dynamic section after removal
+        # The dynamic section may have shifted if it came after .hip_fatbin
+        dynamic_offset = dynamic_phdr.p_offset
+        for idx, action in plan['phdrs_to_update']:
+            if idx == dynamic_phdr_idx and action == 'follows':
+                dynamic_offset -= removal_size
+                break
+
+        # Parse and update dynamic entries
+        # Each Elf64_Dyn is 16 bytes: 8-byte tag + 8-byte value/ptr
+        entry_size = 16
+        num_entries = dynamic_phdr.p_filesz // entry_size
+
+        updated_count = 0
+        for i in range(num_entries):
+            entry_offset = dynamic_offset + i * entry_size
+
+            # Read tag and value
+            tag = struct.unpack_from('<q', data, entry_offset)[0]
+            value = struct.unpack_from('<Q', data, entry_offset + 8)[0]
+
+            # DT_NULL marks end of dynamic section
+            if tag == DT_NULL:
+                break
+
+            # Check if this tag contains an address that needs updating
+            if tag in DT_ADDR_TAGS:
+                # Only update if the address is >= removal_vaddr
+                # (addresses before .hip_fatbin don't need shifting)
+                if value >= removal_vaddr:
+                    new_value = value - removal_size
+                    struct.pack_into('<Q', data, entry_offset + 8, new_value)
+                    updated_count += 1
+
+                    if verbose:
+                        print(f"  Updated dynamic entry tag={tag}: 0x{value:x} -> 0x{new_value:x}")
+
+        if verbose and updated_count > 0:
+            print(f"  Updated {updated_count} dynamic section entries")
+
+    def _update_relocations(self, data: bytearray, plan: dict, *, verbose: bool = False):
+        """Update relocation entries (RELA/REL) that reference shifted addresses"""
+        removal_size = plan['removal_size']
+        removal_vaddr = plan['removal_vaddr']
+
+        # Find .rela.dyn and .rela.plt sections (or .rel.dyn/.rel.plt for REL format)
+        rela_sections = []
+        for idx, shdr in enumerate(self.section_headers):
+            section_name = self.section_names.get(idx, '')
+            # Check for both RELA and REL sections
+            if section_name in ['.rela.dyn', '.rela.plt', '.rel.dyn', '.rel.plt']:
+                rela_sections.append((idx, section_name, shdr))
+
+        updated_count = 0
+        for idx, name, shdr in rela_sections:
+            # Calculate the current offset of this section (may have shifted)
+            section_offset = shdr.sh_offset
+            if idx in plan['sections_to_shift']:
+                section_offset -= removal_size
+
+            # Determine if this is RELA (24 bytes) or REL (16 bytes)
+            # RELA has addend, REL doesn't
+            is_rela = 'rela' in name.lower()
+            entry_size = 24 if is_rela else 16
+
+            num_entries = shdr.sh_size // entry_size
+
+            for i in range(num_entries):
+                entry_offset = section_offset + i * entry_size
+
+                # Read r_offset (first 8 bytes)
+                r_offset = struct.unpack_from('<Q', data, entry_offset)[0]
+
+                # Update r_offset if it points to a shifted location
+                if r_offset >= removal_vaddr:
+                    new_r_offset = r_offset - removal_size
+                    struct.pack_into('<Q', data, entry_offset, new_r_offset)
+                    updated_count += 1
+
+                    if verbose:
+                        print(f"  Updated {name} entry {i}: r_offset 0x{r_offset:x} -> 0x{new_r_offset:x}")
+
+                # For RELA entries, also check r_addend (third 8 bytes)
+                if is_rela:
+                    r_addend = struct.unpack_from('<q', data, entry_offset + 16)[0]
+                    # Only update if addend points PAST the removed section
+                    # Don't update if it points TO or WITHIN the removed section
+                    removal_end = removal_vaddr + removal_size
+                    if r_addend >= removal_end:
+                        new_r_addend = r_addend - removal_size
+                        struct.pack_into('<q', data, entry_offset + 16, new_r_addend)
+                        updated_count += 1
+
+                        if verbose:
+                            print(f"  Updated {name} entry {i}: r_addend 0x{r_addend:x} -> 0x{new_r_addend:x}")
+
+        if verbose and updated_count > 0:
+            print(f"  Updated {updated_count} relocation entries")
+
+    def _update_got_sections(self, data: bytearray, plan: dict, *, verbose: bool = False):
+        """Update GOT and GOT.PLT section pointers that reference shifted addresses"""
+        removal_size = plan['removal_size']
+        removal_vaddr = plan['removal_vaddr']
+        removal_end = removal_vaddr + removal_size
+
+        # Find .got and .got.plt sections
+        got_sections = []
+        for idx, shdr in enumerate(self.section_headers):
+            section_name = self.section_names.get(idx, '')
+            if section_name in ['.got', '.got.plt']:
+                got_sections.append((idx, section_name, shdr))
+
+        updated_count = 0
+        for idx, name, shdr in got_sections:
+            # Calculate the current offset of this section (may have shifted)
+            section_offset = shdr.sh_offset
+            if idx in plan['sections_to_shift']:
+                section_offset -= removal_size
+
+            # GOT entries are 8 bytes (pointers)
+            entry_size = 8
+            num_entries = shdr.sh_size // entry_size
+
+            for i in range(num_entries):
+                entry_offset = section_offset + i * entry_size
+
+                # Read the pointer value
+                ptr_value = struct.unpack_from('<Q', data, entry_offset)[0]
+
+                # Skip null pointers
+                if ptr_value == 0:
+                    continue
+
+                # Update if the pointer points to shifted code/data
+                # Only update if it points PAST the removed section
+                if ptr_value >= removal_end:
+                    new_ptr_value = ptr_value - removal_size
+                    struct.pack_into('<Q', data, entry_offset, new_ptr_value)
+                    updated_count += 1
+
+                    if verbose:
+                        print(f"  Updated {name} entry {i}: 0x{ptr_value:x} -> 0x{new_ptr_value:x}")
+
+        if verbose and updated_count > 0:
+            print(f"  Updated {updated_count} GOT entries")
 
 
 def neutralize_binary(input_path: Path, output_path: Path, *, verbose: bool = False) -> dict:
