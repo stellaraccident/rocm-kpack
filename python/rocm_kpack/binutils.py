@@ -538,3 +538,62 @@ def read_kpack_ref_marker(
             raise RuntimeError(
                 f"Failed to parse .rocm_kpack_ref marker data from {binary_path}: {e}"
             )
+
+
+def get_section_vaddr(
+    toolchain: Toolchain, binary_path: Path, section_name: str
+) -> int | None:
+    """
+    Get the virtual address of a section in an ELF binary.
+
+    Args:
+        toolchain: Toolchain instance providing readelf
+        binary_path: Path to ELF binary
+        section_name: Name of section (e.g., ".custom_data", ".rocm_kpack_ref")
+
+    Returns:
+        Virtual address (sh_addr) of the section if it exists and has ALLOC flag,
+        None otherwise.
+
+    Note:
+        Only returns addresses for sections with the ALLOC flag (A), which indicates
+        they are mapped to memory at load time (part of a PT_LOAD segment).
+    """
+    try:
+        # Run readelf to get section headers
+        result = subprocess.run(
+            [str(toolchain.readelf), "-S", str(binary_path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
+
+    # Parse section headers
+    # Format (two-line entries):
+    # Line 1: [Nr] Name              Type             Address           Offset
+    # Line 2:      Size              EntSize          Flags  Link  Info  Align
+    lines = result.stdout.split("\n")
+    for i, line in enumerate(lines):
+        if section_name in line:
+            parts = line.split()
+            # Check if this is a section header line (starts with [Nr])
+            if len(parts) >= 5 and parts[0].startswith("["):
+                try:
+                    # Address column is at index 3
+                    vaddr = int(parts[3], 16)
+
+                    # Check flags on the next line
+                    if i + 1 < len(lines):
+                        next_parts = lines[i + 1].split()
+                        if len(next_parts) >= 3:
+                            flags = next_parts[2]
+                            # Only return address if section has ALLOC flag (A)
+                            if "A" in flags:
+                                return vaddr
+
+                except (ValueError, IndexError):
+                    continue
+
+    return None

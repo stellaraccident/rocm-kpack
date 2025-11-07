@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from . import elf_zero_pages
+from . import elf_modify_load as elf_zero_pages
 
 
 class ElfHeader(NamedTuple):
