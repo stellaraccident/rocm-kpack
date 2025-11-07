@@ -32,3 +32,4 @@ tests/elf_modify_load/*.zeroed
 tests/elf_modify_load/custom_data.bin
 tests/elf_modify_load/test_should_fail
 tests/elf_modify_load/test_verify_pie
+tests/elf_modify_load/test_interp_preserved.bin

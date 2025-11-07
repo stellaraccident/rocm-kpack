@@ -167,15 +167,19 @@ def is_pie_or_shared_library(data: bytes) -> bool:
     return e_type == ET_DYN
 
 
-def _get_phdr_capacity(data: bytes, ehdr: Elf64_Ehdr) -> int:
-    """Get allocated capacity of PHDR table (may be > e_phnum)."""
-    # Find PT_LOAD covering PHDR
-    for i in range(ehdr.e_phnum):
-        phdr = read_program_header(data, ehdr.e_phoff + i * 56)
-        if phdr.p_type == PT_LOAD:
-            if phdr.p_offset <= ehdr.e_phoff < phdr.p_offset + phdr.p_filesz:
-                return phdr.p_filesz // 56
-    return ehdr.e_phnum
+def _get_phdr_capacity(data: bytes, ehdr: Elf64_Ehdr, min_content_offset: int) -> int:
+    """Get allocated capacity of PHDR table (may be > e_phnum).
+
+    Args:
+        data: ELF binary data
+        ehdr: ELF header
+        min_content_offset: Minimum offset of content after PHDR
+
+    Returns:
+        Number of PHDR entries that can fit in available space
+    """
+    available_space = min_content_offset - ehdr.e_phoff
+    return available_space // 56
 
 
 def resize_phdr_table(
@@ -220,7 +224,7 @@ def resize_phdr_table(
         return (data, ehdr.e_phoff)
 
     # Check if already relocated with spare capacity
-    current_capacity = _get_phdr_capacity(data, ehdr)
+    current_capacity = _get_phdr_capacity(data, ehdr, min_content_offset)
     spare_slots = current_capacity - ehdr.e_phnum
 
     if spare_slots > 0 and len(new_phdrs) <= current_capacity:
@@ -532,11 +536,21 @@ def conservative_zero_page(
     # Compute minimum content offset after PHDR (reading from original data)
     old_phdr_size = ehdr.e_phnum * 56
     min_content_offset = len(new_data)
+
+    # Check section headers
     for i in range(ehdr.e_shnum):
         shdr = read_section_header(data, ehdr.e_shoff + i * 64)
         if shdr.sh_offset > ehdr.e_phoff + old_phdr_size:
             # Adjust offset for removed bytes
             adjusted_offset = shdr.sh_offset - aligned_size if shdr.sh_offset > aligned_offset else shdr.sh_offset
+            min_content_offset = min(min_content_offset, adjusted_offset)
+
+    # Also check program headers for data they reference (e.g., PT_INTERP)
+    for i in range(ehdr.e_phnum):
+        phdr = read_program_header(data, ehdr.e_phoff + i * 56)
+        if phdr.p_offset > ehdr.e_phoff + old_phdr_size and phdr.p_filesz > 0:
+            # Adjust offset for removed bytes
+            adjusted_offset = phdr.p_offset - aligned_size if phdr.p_offset > aligned_offset else phdr.p_offset
             min_content_offset = min(min_content_offset, adjusted_offset)
 
     # Resize PHDR table (handles overflow, spare capacity, etc.)
@@ -775,10 +789,18 @@ def map_section_to_new_load(
     # Compute minimum content offset after PHDR
     old_phdr_size = ehdr.e_phnum * 56
     min_content_offset = len(data)
+
+    # Check section headers
     for i in range(ehdr.e_shnum):
         shdr = read_section_header(data, ehdr.e_shoff + i * 64)
         if shdr.sh_offset > ehdr.e_phoff + old_phdr_size:
             min_content_offset = min(min_content_offset, shdr.sh_offset)
+
+    # Also check program headers for data they reference (e.g., PT_INTERP)
+    for i in range(ehdr.e_phnum):
+        phdr = read_program_header(data, ehdr.e_phoff + i * 56)
+        if phdr.p_offset > ehdr.e_phoff + old_phdr_size and phdr.p_filesz > 0:
+            min_content_offset = min(min_content_offset, phdr.p_offset)
 
     # Resize program header table (handles in-place or relocation)
     data, new_phoff = resize_phdr_table(

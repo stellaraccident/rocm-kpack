@@ -720,3 +720,82 @@ def test_full_workflow_map_and_relocate(build_mapped_section_test, toolchain):
     # Cleanup
     step1_bin.unlink(missing_ok=True)
     final_bin.unlink(missing_ok=True)
+
+
+def test_preserves_pt_interp_when_expanding_phdr(build_mapped_section_test):
+    """
+    Test that PT_INTERP is preserved when PHDR table expansion is required.
+
+    Regression test for bug where expanding PHDR table from 11 to 15+ entries
+    would overwrite PT_INTERP data that immediately follows the original PHDR table.
+
+    This happened because:
+    - Original PHDR: 11 entries, ends at offset 0x2a8
+    - PT_INTERP data starts at 0x2a8 (interpreter path string)
+    - Expanding to 15 entries would overwrite the interpreter path
+
+    The fix ensures min_content_offset accounts for data referenced by program
+    headers (like PT_INTERP), not just section headers.
+
+    This test uses the test_mapped_section binary which, after being built with
+    custom_data.bin mapped in, has a layout that triggers PHDR expansion when
+    zero-paging is applied.
+    """
+    # Use the test binary
+    input_bin = TEST_DIR / "test_mapped_section"
+    output_bin = TEST_DIR / "test_interp_preserved.bin"
+
+    # Map .custom_data to a new PT_LOAD (triggers PHDR expansion)
+    # First we need to ensure the binary is built and has custom_data mapped
+    if not input_bin.exists():
+        pytest.skip("test_mapped_section binary not built")
+
+    exit_code = main([
+        'map-section',
+        str(input_bin),
+        str(output_bin),
+        '--section=.custom_data',  # This will trigger PHDR table expansion
+        '--quiet',
+    ])
+
+    assert exit_code == 0, "map-section should succeed"
+
+    # Verify PT_INTERP is intact using readelf
+    result = subprocess.run(
+        ["readelf", "-l", str(output_bin)],
+        capture_output=True,
+        text=True
+    )
+
+    assert result.returncode == 0, "readelf should succeed"
+
+    # Check for correct interpreter path
+    assert "/lib64/ld-linux-x86-64.so.2" in result.stdout, \
+        "PT_INTERP should contain correct interpreter path"
+
+    # Should NOT contain corrupted data like "P<E5>td"
+    assert "P�td" not in result.stdout, \
+        "PT_INTERP should not be corrupted"
+    assert "P<E5>td" not in result.stdout, \
+        "PT_INTERP should not be corrupted"
+
+    # Verify ldd can read the binary (comprehensive check)
+    ldd_result = subprocess.run(
+        ["ldd", str(output_bin)],
+        capture_output=True,
+        text=True
+    )
+
+    # ldd should succeed (exit code 0 or 1 is OK - 1 just means missing libs)
+    assert ldd_result.returncode in [0, 1], "ldd should be able to parse binary"
+
+    # Should show the correct interpreter
+    assert "/lib64/ld-linux-x86-64.so.2" in ldd_result.stdout, \
+        "ldd should show correct interpreter"
+
+    # Should NOT show corrupted data
+    assert "�" not in ldd_result.stdout, \
+        "ldd output should not contain corrupted unicode"
+
+    # Cleanup
+    output_bin.unlink(missing_ok=True)
