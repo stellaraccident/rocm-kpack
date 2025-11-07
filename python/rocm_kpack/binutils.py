@@ -8,8 +8,6 @@ from typing import Any
 
 import msgpack
 
-from rocm_kpack.elf_fat_device_neutralizer import neutralize_binary
-
 
 class BinaryType(Enum):
     """Type of bundled binary file."""
@@ -404,7 +402,9 @@ class BundledBinary:
                 )
         else:
             # Use ELF fat device neutralizer (actually reclaims disk space)
-            neutralize_binary(self.file_path, output_path)
+            # Import here to avoid circular dependency
+            from rocm_kpack.elf_fat_device_neutralizer import neutralize_binary
+            neutralize_binary(self.file_path, output_path, toolchain=self.toolchain)
 
     def cleanup(self) -> None:
         """Clean up temporary files created during operations."""

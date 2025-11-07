@@ -177,12 +177,6 @@ class PackingVisitor(ArtifactVisitor):
                 for prepared in prepared_kernels:
                     self.archive.add_kernel(prepared)
 
-        # Create host-only binary (without .hip_fatbin section)
-        host_only_dest = self.output_root / artifact_path.relative_path
-        host_only_dest.parent.mkdir(parents=True, exist_ok=True)
-        bundled_binary.create_host_only(host_only_dest)
-
-        # Add kpack ref marker to host-only binary
         # Compute relative path from binary location to .kpack directory
         binary_depth = len(artifact_path.relative_path.parent.parts)
         if binary_depth == 0:
@@ -192,13 +186,33 @@ class PackingVisitor(ArtifactVisitor):
             # Binary is in subdirectory - need to go up
             kpack_relative_path = "/".join([".."] * binary_depth + [".kpack", self.kpack_filename])
 
-        add_kpack_ref_marker(
-            binary_path=host_only_dest,
-            output_path=host_only_dest,  # In-place modification
-            kpack_search_paths=[kpack_relative_path],
-            kernel_name=artifact_path.relative_path.as_posix(),
-            toolchain=self.toolchain,
-        )
+        # Add kpack ref marker to original binary FIRST (before neutralization)
+        # This creates a temporary binary with .rocm_kpack_ref section added
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.with_marker', delete=False) as tmp:
+            temp_with_marker = Path(tmp.name)
+
+        try:
+            add_kpack_ref_marker(
+                binary_path=bundled_binary.file_path,
+                output_path=temp_with_marker,
+                kpack_search_paths=[kpack_relative_path],
+                kernel_name=artifact_path.relative_path.as_posix(),
+                toolchain=self.toolchain,
+            )
+
+            # Create host-only binary (without .hip_fatbin section) from the marked binary
+            # The neutralizer will zero-page .hip_fatbin and map .rocm_kpack_ref to PT_LOAD
+            host_only_dest = self.output_root / artifact_path.relative_path
+            host_only_dest.parent.mkdir(parents=True, exist_ok=True)
+
+            from rocm_kpack.elf_fat_device_neutralizer import neutralize_binary
+            neutralize_binary(temp_with_marker, host_only_dest, toolchain=self.toolchain)
+
+        finally:
+            # Clean up temp file
+            if temp_with_marker.exists():
+                temp_with_marker.unlink()
 
     def visit_kernel_database(
         self, artifact_path: ArtifactPath, database: Any
