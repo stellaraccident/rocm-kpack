@@ -1,24 +1,24 @@
-"""Tests for ELF fat device neutralizer."""
+"""Tests for ELF offload kpacker."""
 
 import os
 import subprocess
 from pathlib import Path
 
-from rocm_kpack.elf_fat_device_neutralizer import neutralize_binary, ElfFatDeviceNeutralizer
+from rocm_kpack.elf_offload_kpacker import kpack_offload_binary, ElfOffloadKpacker
 from rocm_kpack import binutils
 
 
-def test_neutralize_fat_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
-    """Test neutralizing a fat binary with .hip_fatbin section."""
+def test_kpack_fat_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
+    """Test kpacking a fat binary with .hip_fatbin section."""
     # Use a multi-arch bundled binary
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
-    output_binary = tmp_path / "test_kernel_multi_neutralized.exe"
+    output_binary = tmp_path / "test_kernel_multi_kpacked.exe"
 
     # Get original size
     original_size = input_binary.stat().st_size
 
-    # Neutralize
-    result = neutralize_binary(input_binary, output_binary, verbose=True)
+    # Kpack
+    result = kpack_offload_binary(input_binary, output_binary, verbose=True)
 
     # Verify output exists
     assert output_binary.exists()
@@ -55,14 +55,14 @@ def test_neutralize_fat_binary(tmp_path: Path, test_assets_dir: Path, toolchain:
     assert os.access(output_binary, os.X_OK), "Output binary should be executable"
 
 
-def test_neutralize_shared_library(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
-    """Test neutralizing a shared library with .hip_fatbin section."""
+def test_kpack_shared_library(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
+    """Test kpacking a shared library with .hip_fatbin section."""
     input_library = test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_single.so"
-    output_library = tmp_path / "libtest_kernel_single_neutralized.so"
+    output_library = tmp_path / "libtest_kernel_single_kpacked.so"
 
     original_size = input_library.stat().st_size
 
-    result = neutralize_binary(input_library, output_library, verbose=True)
+    result = kpack_offload_binary(input_library, output_library, verbose=True)
 
     # Verify size reduction
     assert output_library.exists()
@@ -79,14 +79,14 @@ def test_neutralize_shared_library(tmp_path: Path, test_assets_dir: Path, toolch
     assert "DYN (Shared object file)" in readelf_result.stdout
 
 
-def test_neutralize_host_only_binary(tmp_path: Path, test_assets_dir: Path):
-    """Test neutralizing a binary without .hip_fatbin (should just copy)."""
+def test_kpack_host_only_binary(tmp_path: Path, test_assets_dir: Path):
+    """Test kpacking a binary without .hip_fatbin (should just copy)."""
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/host_only.exe"
-    output_binary = tmp_path / "host_only_neutralized.exe"
+    output_binary = tmp_path / "host_only_kpacked.exe"
 
     original_size = input_binary.stat().st_size
 
-    result = neutralize_binary(input_binary, output_binary, verbose=True)
+    result = kpack_offload_binary(input_binary, output_binary, verbose=True)
 
     # Should just copy the file
     assert output_binary.exists()
@@ -96,25 +96,25 @@ def test_neutralize_host_only_binary(tmp_path: Path, test_assets_dir: Path):
     assert result["new_size"] == original_size
 
 
-def test_neutralizer_has_hip_fatbin(test_assets_dir: Path):
+def test_kpacker_has_hip_fatbin(test_assets_dir: Path):
     """Test the has_hip_fatbin() method."""
     # Fat binary should have .hip_fatbin
     fat_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
-    neutralizer = ElfFatDeviceNeutralizer(fat_binary)
-    assert neutralizer.has_hip_fatbin() is True
+    kpacker = ElfOffloadKpacker(fat_binary)
+    assert kpacker.has_hip_fatbin() is True
 
     # Host-only binary should not have .hip_fatbin
     host_only = test_assets_dir / "bundled_binaries/linux/cov5/host_only.exe"
-    neutralizer = ElfFatDeviceNeutralizer(host_only)
-    assert neutralizer.has_hip_fatbin() is False
+    kpacker = ElfOffloadKpacker(host_only)
+    assert kpacker.has_hip_fatbin() is False
 
 
-def test_neutralizer_calculate_removal_plan(test_assets_dir: Path):
+def test_kpacker_calculate_removal_plan(test_assets_dir: Path):
     """Test the calculate_removal_plan() method."""
     fat_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
-    neutralizer = ElfFatDeviceNeutralizer(fat_binary)
+    kpacker = ElfOffloadKpacker(fat_binary)
 
-    plan = neutralizer.calculate_removal_plan()
+    plan = kpacker.calculate_removal_plan()
 
     # Verify plan structure
     assert "removal_size" in plan
@@ -131,17 +131,17 @@ def test_neutralizer_calculate_removal_plan(test_assets_dir: Path):
 
 
 def test_integration_with_binutils_create_host_only(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
-    """Test that BundledBinary.create_host_only() uses the neutralizer by default."""
+    """Test that BundledBinary.create_host_only() uses the kpacker by default."""
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
     output_binary = tmp_path / "libtest_kernel_multi_host_only.so"
 
     original_size = input_binary.stat().st_size
 
-    # Create BundledBinary and call create_host_only (should use neutralizer by default)
+    # Create BundledBinary and call create_host_only (should use kpacker by default)
     bb = binutils.BundledBinary(input_binary, toolchain=toolchain)
     bb.create_host_only(output_binary, use_objcopy=False)
 
-    # Verify size reduction (neutralizer should actually reduce size)
+    # Verify size reduction (kpacker should actually reduce size)
     assert output_binary.exists()
     new_size = output_binary.stat().st_size
     assert new_size < original_size
@@ -152,20 +152,20 @@ def test_integration_with_binutils_create_host_only(tmp_path: Path, test_assets_
 
     objcopy_size = output_binary_objcopy.stat().st_size
     # Neutralizer should remove more bytes than objcopy
-    neutralizer_reduction = original_size - new_size
+    kpacker_reduction = original_size - new_size
     objcopy_reduction = original_size - objcopy_size
-    assert neutralizer_reduction > objcopy_reduction
+    assert kpacker_reduction > objcopy_reduction
 
 
-def test_neutralized_binary_compatible_with_objcopy(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
-    """Test that objcopy --add-section works on neutralized binaries."""
+def test_kpacked_binary_compatible_with_objcopy(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
+    """Test that objcopy --add-section works on kpacked binaries."""
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
-    output_binary = tmp_path / "test_kernel_multi_neutralized.exe"
+    output_binary = tmp_path / "test_kernel_multi_kpacked.exe"
 
     # Neutralize the binary
-    neutralize_binary(input_binary, output_binary, verbose=True)
+    kpack_offload_binary(input_binary, output_binary, verbose=True)
 
-    # Verify neutralized binary exists
+    # Verify kpacked binary exists
     assert output_binary.exists()
 
     # Create a dummy section content
@@ -189,8 +189,8 @@ def test_neutralized_binary_compatible_with_objcopy(tmp_path: Path, test_assets_
         )
     except subprocess.CalledProcessError as e:
         raise AssertionError(
-            f"objcopy --add-section failed on neutralized binary. "
-            f"This indicates the neutralizer produced an invalid ELF file. "
+            f"objcopy --add-section failed on kpacked binary. "
+            f"This indicates the kpacker produced an invalid ELF file. "
             f"Error: {e.stderr}"
         )
 

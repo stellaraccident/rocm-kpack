@@ -1,13 +1,13 @@
 """
-ELF Fat Device Neutralizer - Maps kpack references and removes .hip_fatbin content.
+ELF Offload Kpacker - Maps kpack references and removes .hip_fatbin content.
 
-This module neutralizes fat binaries for use with kpack'd device code by:
+This module transforms fat binaries for use with kpack'd device code by:
 1. Zero-paging .hip_fatbin section (removes device code, reclaims disk space)
 2. Mapping .rocm_kpack_ref section to new PT_LOAD segment
 3. Updating __CudaFatBinaryWrapper pointer to reference kpack metadata
 4. Rewriting magic from HIPF to HIPK for runtime detection
 
-The neutralized binary contains only:
+The kpack'd binary contains only:
 - Host code (executable code that runs on CPU)
 - Kpack metadata (MessagePack structure pointing to external .kpack files)
 
@@ -123,8 +123,8 @@ DT_ADDR_TAGS = {
 }
 
 
-class ElfFatDeviceNeutralizer:
-    """Neutralizes ELF fat binaries by removing .hip_fatbin section and reclaiming space."""
+class ElfOffloadKpacker:
+    """Transforms ELF fat binaries by removing .hip_fatbin section and reclaiming space."""
 
     def __init__(self, input_path: Path):
         self.input_path = Path(input_path)
@@ -652,7 +652,7 @@ def _rewrite_hipfatbin_magic(data: bytearray, *, verbose: bool = False) -> bool:
     return True
 
 
-def neutralize_binary(
+def kpack_offload_binary(
     input_path: Path,
     output_path: Path,
     *,
@@ -660,7 +660,7 @@ def neutralize_binary(
     verbose: bool = False
 ) -> dict:
     """
-    Neutralize an ELF fat binary by mapping kpack reference and removing device code.
+    Transform an ELF fat binary by mapping kpack reference and removing device code.
 
     This function assumes the input binary already has a `.rocm_kpack_ref` section
     (added via binutils.add_kpack_ref_marker()). It performs:
@@ -671,15 +671,15 @@ def neutralize_binary(
 
     Args:
         input_path: Path to binary with `.rocm_kpack_ref` section already added
-        output_path: Path for neutralized binary
+        output_path: Path for kpack'd binary
         toolchain: Toolchain instance (created if not provided)
         verbose: If True, print detailed progress information
 
     Returns:
-        Dictionary with statistics about the neutralization
+        Dictionary with statistics about the transformation
 
     Raises:
-        RuntimeError: If `.rocm_kpack_ref` section not found or neutralization fails
+        RuntimeError: If `.rocm_kpack_ref` section not found or transformation fails
     """
     if toolchain is None:
         toolchain = Toolchain()

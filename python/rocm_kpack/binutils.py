@@ -370,7 +370,7 @@ class BundledBinary:
 
         Args:
             output_path: Path where host-only binary will be written
-            use_objcopy: If False (default), use ELF fat device neutralizer (reclaims space).
+            use_objcopy: If False (default), use ELF offload kpacker (reclaims space).
                         If True, use objcopy (only removes headers, no space reclaimed).
 
         Raises:
@@ -401,10 +401,10 @@ class BundledBinary:
                     f"Failed to remove .hip_fatbin section from {self.file_path}: {e}"
                 )
         else:
-            # Use ELF fat device neutralizer (actually reclaims disk space)
+            # Use ELF offload kpacker (actually reclaims disk space)
             # Import here to avoid circular dependency
-            from rocm_kpack.elf_fat_device_neutralizer import neutralize_binary
-            neutralize_binary(self.file_path, output_path, toolchain=self.toolchain)
+            from rocm_kpack.elf_offload_kpacker import kpack_offload_binary
+            kpack_offload_binary(self.file_path, output_path, toolchain=self.toolchain)
 
     def cleanup(self) -> None:
         """Clean up temporary files created during operations."""
