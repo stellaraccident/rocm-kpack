@@ -1,14 +1,18 @@
 """
-ELF Fat Device Neutralizer - Removes .hip_fatbin section and reclaims disk space.
+ELF Fat Device Neutralizer - Maps kpack references and removes .hip_fatbin content.
 
-This module neutralizes fat binaries by:
-1. Removing .hip_fatbin section content (not just headers)
-2. Shifting subsequent sections to fill the gap
-3. Updating all ELF structures (program headers, section headers)
-4. Actually reclaiming disk space
+This module neutralizes fat binaries for use with kpack'd device code by:
+1. Zero-paging .hip_fatbin section (removes device code, reclaims disk space)
+2. Mapping .rocm_kpack_ref section to new PT_LOAD segment
+3. Updating __CudaFatBinaryWrapper pointer to reference kpack metadata
+4. Rewriting magic from HIPF to HIPK for runtime detection
 
-Unlike objcopy --remove-section, this neutralizer modifies PT_LOAD segments
-to eliminate the device code content, creating true host-only binaries.
+The neutralized binary contains only:
+- Host code (executable code that runs on CPU)
+- Kpack metadata (MessagePack structure pointing to external .kpack files)
+
+At runtime, the CLR will detect the HIPK magic and load device code from
+.kpack archives instead of trying to use the (now removed) .hip_fatbin section.
 
 Note: Currently supports 64-bit little-endian ELF (Linux).
 TODO: Windows PE/COFF support will require similar approach with different binary format.
@@ -20,7 +24,8 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from . import elf_modify_load as elf_zero_pages
+from . import elf_modify_load
+from .binutils import get_section_vaddr, Toolchain
 
 
 class ElfHeader(NamedTuple):
@@ -587,17 +592,17 @@ def _rewrite_hipfatbin_magic(data: bytearray, *, verbose: bool = False) -> bool:
 
     # Parse ELF header to find sections
     try:
-        ehdr = elf_zero_pages.read_elf_header(data)
+        ehdr = elf_modify_load.read_elf_header(data)
     except ValueError as e:
         raise RuntimeError(f"Failed to parse ELF header: {e}") from e
 
     # Find .hipFatBinSegment section
-    shstrtab_shdr = elf_zero_pages.read_section_header(data, ehdr.e_shoff + ehdr.e_shstrndx * 64)
+    shstrtab_shdr = elf_modify_load.read_section_header(data, ehdr.e_shoff + ehdr.e_shstrndx * 64)
     shstrtab_offset = shstrtab_shdr.sh_offset
 
     hipfatbin_segment_shdr = None
     for i in range(ehdr.e_shnum):
-        shdr = elf_zero_pages.read_section_header(data, ehdr.e_shoff + i * 64)
+        shdr = elf_modify_load.read_section_header(data, ehdr.e_shoff + i * 64)
         name_offset = shstrtab_offset + shdr.sh_name
         name_end = data.find(b'\x00', name_offset)
         name = data[name_offset:name_end].decode('utf-8')
@@ -647,39 +652,52 @@ def _rewrite_hipfatbin_magic(data: bytearray, *, verbose: bool = False) -> bool:
     return True
 
 
-def neutralize_binary(input_path: Path, output_path: Path, *, verbose: bool = False) -> dict:
+def neutralize_binary(
+    input_path: Path,
+    output_path: Path,
+    *,
+    toolchain: Toolchain | None = None,
+    verbose: bool = False
+) -> dict:
     """
-    Neutralize an ELF fat binary using two-phase approach:
-    1. Zero-page optimization (removes .hip_fatbin content, reorganizes ELF)
-    2. Magic number rewriting (HIPF -> HIPK for runtime detection)
+    Neutralize an ELF fat binary by mapping kpack reference and removing device code.
+
+    This function assumes the input binary already has a `.rocm_kpack_ref` section
+    (added via binutils.add_kpack_ref_marker()). It performs:
+    1. Zero-page `.hip_fatbin` section (removes device code)
+    2. Map `.rocm_kpack_ref` to new PT_LOAD segment
+    3. Update `__CudaFatBinaryWrapper.binary` pointer to mapped `.rocm_kpack_ref`
+    4. Rewrite magic from HIPF to HIPK
 
     Args:
-        input_path: Path to original fat binary
-        output_path: Path for neutralized (host-only) binary
+        input_path: Path to binary with `.rocm_kpack_ref` section already added
+        output_path: Path for neutralized binary
+        toolchain: Toolchain instance (created if not provided)
         verbose: If True, print detailed progress information
 
     Returns:
         Dictionary with statistics about the neutralization
+
+    Raises:
+        RuntimeError: If `.rocm_kpack_ref` section not found or neutralization fails
     """
-    # Check if input has .hip_fatbin section
-    neutralizer = ElfFatDeviceNeutralizer(input_path)
+    if toolchain is None:
+        toolchain = Toolchain()
 
-    if not neutralizer.has_hip_fatbin():
-        if verbose:
-            print(f"  No .hip_fatbin section found, copying as-is")
-        output_path.write_bytes(neutralizer.data)
-        os.chmod(output_path, neutralizer.original_mode)
-        return {'removed': 0, 'original_size': len(neutralizer.data), 'new_size': len(neutralizer.data)}
+    original_size = input_path.stat().st_size
+    original_mode = input_path.stat().st_mode
 
-    original_size = len(neutralizer.data)
-
-    # Phase 1: Apply zero-page optimization to remove device code
-    if verbose:
-        print(f"\nPhase 1: Zero-page optimization")
-
+    # Temporary files for pipeline
     temp_zeropaged = output_path.with_suffix(output_path.suffix + '.zeropaged')
+    temp_mapped = output_path.with_suffix(output_path.suffix + '.mapped')
+    temp_pointed = output_path.with_suffix(output_path.suffix + '.pointed')
+
     try:
-        success = elf_zero_pages.conservative_zero_page(
+        # Phase 1: Zero-page .hip_fatbin section
+        if verbose:
+            print(f"\nPhase 1: Zero-page .hip_fatbin")
+
+        success = elf_modify_load.conservative_zero_page(
             input_path,
             temp_zeropaged,
             section_name=".hip_fatbin",
@@ -687,29 +705,63 @@ def neutralize_binary(input_path: Path, output_path: Path, *, verbose: bool = Fa
         )
 
         if not success:
-            raise RuntimeError(
-                "Zero-page optimization failed. "
-                "Binary may have insufficient space for program headers or other structural issues."
-            )
+            raise RuntimeError("Zero-page optimization failed")
 
-        # Phase 2: Apply magic number rewriting
+        # Phase 2: Map .rocm_kpack_ref to new PT_LOAD
         if verbose:
-            print(f"\nPhase 2: Magic number rewriting (HIPF -> HIPK)")
+            print(f"\nPhase 2: Map .rocm_kpack_ref to PT_LOAD")
 
-        data = bytearray(temp_zeropaged.read_bytes())
-        magic_rewritten = _rewrite_hipfatbin_magic(data, verbose=verbose)
+        success = elf_modify_load.map_section_to_new_load(
+            temp_zeropaged,
+            temp_mapped,
+            section_name=".rocm_kpack_ref",
+            new_vaddr=None,  # Auto-allocate
+            verbose=verbose
+        )
 
-        if not magic_rewritten:
-            raise RuntimeError(
-                "Failed to rewrite magic number. "
-                "Binary may already be neutralized (HIPK magic) or .hipFatBinSegment section is missing."
-            )
+        if not success:
+            raise RuntimeError("Failed to map .rocm_kpack_ref section")
+
+        # Phase 3: Find mapped address of .rocm_kpack_ref
+        kpack_ref_vaddr = get_section_vaddr(toolchain, temp_mapped, ".rocm_kpack_ref")
+        if kpack_ref_vaddr is None:
+            raise RuntimeError(".rocm_kpack_ref section not found after mapping")
+
+        if verbose:
+            print(f"\nPhase 3: Update __CudaFatBinaryWrapper pointer")
+            print(f"  .rocm_kpack_ref mapped to: 0x{kpack_ref_vaddr:x}")
+
+        # Find .hipFatBinSegment section address (contains __CudaFatBinaryWrapper)
+        hipfatbin_segment_vaddr = get_section_vaddr(toolchain, temp_mapped, ".hipFatBinSegment")
+        if hipfatbin_segment_vaddr is None:
+            raise RuntimeError(".hipFatBinSegment section not found")
+
+        # Pointer is at offset +8 in __CudaFatBinaryWrapper structure
+        pointer_vaddr = hipfatbin_segment_vaddr + 8
+
+        # Phase 4: Update pointer to point to .rocm_kpack_ref
+        success = elf_modify_load.set_pointer(
+            temp_mapped,
+            temp_pointed,
+            pointer_vaddr=pointer_vaddr,
+            target_vaddr=kpack_ref_vaddr,
+            update_relocation=True,
+            verbose=verbose
+        )
+
+        if not success:
+            raise RuntimeError("Failed to set pointer")
+
+        # Phase 5: Rewrite magic HIPF→HIPK
+        if verbose:
+            print(f"\nPhase 4: Rewrite magic (HIPF → HIPK)")
+
+        data = bytearray(temp_pointed.read_bytes())
+        _rewrite_hipfatbin_magic(data, verbose=verbose)
 
         # Write final output
         output_path.write_bytes(data)
-
-        # Preserve original permissions
-        os.chmod(output_path, neutralizer.original_mode)
+        os.chmod(output_path, original_mode)
 
         final_size = len(data)
         removed = original_size - final_size
@@ -724,10 +776,11 @@ def neutralize_binary(input_path: Path, output_path: Path, *, verbose: bool = Fa
             'removed': removed,
             'original_size': original_size,
             'new_size': final_size,
-            'magic_rewritten': magic_rewritten
+            'kpack_ref_vaddr': kpack_ref_vaddr
         }
 
     finally:
-        # Clean up temporary file
-        if temp_zeropaged.exists():
-            temp_zeropaged.unlink()
+        # Clean up temporary files
+        for temp_file in [temp_zeropaged, temp_mapped, temp_pointed]:
+            if temp_file.exists():
+                temp_file.unlink()
