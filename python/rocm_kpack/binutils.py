@@ -111,10 +111,12 @@ class BundledBinary:
     """
 
     def __init__(self, file_path: Path, *, toolchain: Toolchain | None = None):
+        # Initialize _temp_dir first to ensure cleanup works even if init fails
+        self._temp_dir: Path | None = None  # For extracted .hip_fatbin sections
+
         self.toolchain = toolchain or Toolchain()
         self.file_path = file_path
         self.binary_type = self._detect_binary_type()
-        self._temp_dir: Path | None = None  # For extracted .hip_fatbin sections
 
     def unbundle(
         self, *, dest_dir: Path | None = None, delete_on_close: bool = True
