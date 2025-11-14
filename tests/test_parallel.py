@@ -6,7 +6,7 @@ import pytest
 
 from rocm_kpack.compression import ZstdCompressor
 from rocm_kpack.kpack import PackedKernelArchive
-from rocm_kpack.parallel import get_worker_count, parallel_prepare_kernels
+from rocm_kpack.parallel import KernelInput, get_worker_count, parallel_prepare_kernels
 
 
 class TestGetWorkerCount:
@@ -52,8 +52,8 @@ class TestParallelPrepareKernels:
         )
 
         kernels = [
-            ("bin/test1", "gfx1100", b"kernel_data_1", None),
-            ("bin/test2", "gfx1100", b"kernel_data_2", None),
+            KernelInput("bin/test1", "gfx1100", b"kernel_data_1", None),
+            KernelInput("bin/test2", "gfx1100", b"kernel_data_2", None),
         ]
         result = parallel_prepare_kernels(archive, kernels, executor=None)
 
@@ -70,10 +70,10 @@ class TestParallelPrepareKernels:
         )
 
         kernels = [
-            ("bin/test1", "gfx1100", b"kernel_data_1", None),
-            ("bin/test2", "gfx1030", b"kernel_data_2", None),
-            ("bin/test3", "gfx1100", b"kernel_data_3", None),
-            ("bin/test4", "gfx1030", b"kernel_data_4", None),
+            KernelInput("bin/test1", "gfx1100", b"kernel_data_1", None),
+            KernelInput("bin/test2", "gfx1030", b"kernel_data_2", None),
+            KernelInput("bin/test3", "gfx1100", b"kernel_data_3", None),
+            KernelInput("bin/test4", "gfx1030", b"kernel_data_4", None),
         ]
 
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -102,10 +102,10 @@ class TestParallelPrepareKernels:
         # Create larger kernels to actually benefit from compression
         large_data = b"A" * 10000
         kernels = [
-            ("bin/test1", "gfx1100", large_data, None),
-            ("bin/test2", "gfx1100", large_data, None),
-            ("bin/test3", "gfx1100", large_data, None),
-            ("bin/test4", "gfx1100", large_data, None),
+            KernelInput("bin/test1", "gfx1100", large_data, None),
+            KernelInput("bin/test2", "gfx1100", large_data, None),
+            KernelInput("bin/test3", "gfx1100", large_data, None),
+            KernelInput("bin/test4", "gfx1100", large_data, None),
         ]
 
         with ThreadPoolExecutor(max_workers=2) as executor:

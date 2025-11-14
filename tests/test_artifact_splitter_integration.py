@@ -17,6 +17,7 @@ from rocm_kpack.artifact_splitter import (
 )
 from rocm_kpack.artifact_utils import read_artifact_manifest, write_artifact_manifest
 from rocm_kpack.database_handlers import RocBLASHandler
+from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
 
 
 class TestArtifactSplitterIntegration:
@@ -188,6 +189,11 @@ class TestArtifactSplitterIntegration:
         original_size = fat_binary_src.stat().st_size
         stripped_size = (generic_lib_dir / "libtest.so").stat().st_size
         assert stripped_size < original_size, "Stripped binary should be smaller than original"
+
+        # Run the artifact verifier to check all invariants
+        verifier = ArtifactVerifier(output_dir, toolchain, verbose=False)
+        all_checks_passed = verifier.run_all_checks()
+        assert all_checks_passed, "Artifact verification should pass all checks"
 
     def test_artifact_with_database_files(self, create_test_artifact, toolchain, tmp_path):
         """Test splitting artifact with kernel database files."""

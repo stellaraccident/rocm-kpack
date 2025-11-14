@@ -16,7 +16,11 @@ class BinaryType(Enum):
 
 
 class Toolchain:
-    """Manages configuration of various toolchain locations."""
+    """Manages configuration of various toolchain locations.
+
+    Tools are lazily found and cached on first access, so construction never fails.
+    Only when a specific tool is accessed will it be searched for and validated.
+    """
 
     def __init__(
         self,
@@ -25,11 +29,15 @@ class Toolchain:
         objcopy: Path | None = None,
         readelf: Path | None = None,
     ):
-        self.clang_offload_bundler = self._validate_or_find(
-            "clang-offload-bundler", clang_offload_bundler
-        )
-        self.objcopy = self._validate_or_find("objcopy", objcopy)
-        self.readelf = self._validate_or_find("readelf", readelf)
+        # Store explicit paths (may be None)
+        self._clang_offload_bundler_path = clang_offload_bundler
+        self._objcopy_path = objcopy
+        self._readelf_path = readelf
+
+        # Cached resolved paths
+        self._clang_offload_bundler_cached: Path | None = None
+        self._objcopy_cached: Path | None = None
+        self._readelf_cached: Path | None = None
 
     @staticmethod
     def configure_argparse(p: argparse.ArgumentParser):
@@ -55,6 +63,29 @@ class Toolchain:
                 f"Tool '{tool_file_name}' at path {explicit_path} does not exist"
             )
         return explicit_path
+
+    @property
+    def clang_offload_bundler(self) -> Path:
+        """Get clang-offload-bundler path (lazy, cached)."""
+        if self._clang_offload_bundler_cached is None:
+            self._clang_offload_bundler_cached = self._validate_or_find(
+                "clang-offload-bundler", self._clang_offload_bundler_path
+            )
+        return self._clang_offload_bundler_cached
+
+    @property
+    def objcopy(self) -> Path:
+        """Get objcopy path (lazy, cached)."""
+        if self._objcopy_cached is None:
+            self._objcopy_cached = self._validate_or_find("objcopy", self._objcopy_path)
+        return self._objcopy_cached
+
+    @property
+    def readelf(self) -> Path:
+        """Get readelf path (lazy, cached)."""
+        if self._readelf_cached is None:
+            self._readelf_cached = self._validate_or_find("readelf", self._readelf_path)
+        return self._readelf_cached
 
     def exec_capture_text(self, args: list[str | Path]):
         return subprocess.check_output([str(a) for a in args], stderr=subprocess.STDOUT).decode()
@@ -364,16 +395,18 @@ class BundledBinary:
                     architectures.append(parts[-1])
         return architectures
 
-    def create_host_only(self, output_path: Path, use_objcopy: bool = False) -> None:
+    def create_host_only(self, output_path: Path) -> None:
         """Create a host-only version of the binary without GPU device code.
 
         Only supported for BUNDLED binaries (executables/libraries with .hip_fatbin).
-        Removes the .hip_fatbin section to create a host-only version.
+        Removes the .hip_fatbin section and reclaims disk space using the ELF kpacker.
+
+        Prerequisites:
+            The input binary must have a `.rocm_kpack_ref` section added via
+            add_kpack_ref_marker() before calling this method.
 
         Args:
             output_path: Path where host-only binary will be written
-            use_objcopy: If False (default), use ELF offload kpacker (reclaims space).
-                        If True, use objcopy (only removes headers, no space reclaimed).
 
         Raises:
             RuntimeError: If operation fails or called on STANDALONE binary
@@ -385,28 +418,41 @@ class BundledBinary:
                 f"If you need to extract the host bundle from a .co file, use unbundle() instead."
             )
 
-        # For BUNDLED binaries, remove .hip_fatbin section
-        if use_objcopy:
-            # Use objcopy (only removes section headers, no space reclaimed)
-            try:
-                self.toolchain.exec(
-                    [
-                        self.toolchain.objcopy,
-                        "--remove-section",
-                        ".hip_fatbin",
-                        self.file_path,
-                        output_path,
-                    ]
-                )
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(
-                    f"Failed to remove .hip_fatbin section from {self.file_path}: {e}"
-                )
-        else:
-            # Use ELF offload kpacker (actually reclaims disk space)
-            # Import here to avoid circular dependency
-            from rocm_kpack.elf_offload_kpacker import kpack_offload_binary
-            kpack_offload_binary(self.file_path, output_path, toolchain=self.toolchain)
+        # Use ELF offload kpacker (actually reclaims disk space)
+        # Import here to avoid circular dependency
+        from rocm_kpack.elf_offload_kpacker import kpack_offload_binary
+        kpack_offload_binary(self.file_path, output_path, toolchain=self.toolchain)
+
+    def remove_section_simple(self, output_path: Path, section_name: str) -> None:
+        """Remove a section using objcopy (simple header removal, no space reclaimed).
+
+        This is a simple section removal that only updates ELF headers without
+        reclaiming disk space. Useful for benchmarking or comparison purposes.
+
+        For production use with .hip_fatbin removal, use create_host_only() instead,
+        which properly reclaims disk space.
+
+        Args:
+            output_path: Path where modified binary will be written
+            section_name: Name of section to remove (e.g., ".hip_fatbin")
+
+        Raises:
+            RuntimeError: If objcopy fails
+        """
+        try:
+            self.toolchain.exec(
+                [
+                    self.toolchain.objcopy,
+                    "--remove-section",
+                    section_name,
+                    self.file_path,
+                    output_path,
+                ]
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"Failed to remove section {section_name} from {self.file_path}: {e}"
+            )
 
     def cleanup(self) -> None:
         """Clean up temporary files created during operations."""
@@ -599,3 +645,79 @@ def get_section_vaddr(
                     continue
 
     return None
+
+
+def has_section(
+    binary_path: Path,
+    section_name: str,
+    *,
+    toolchain: Toolchain | None = None,
+) -> bool:
+    """Check if a binary has a specific section.
+
+    Args:
+        binary_path: Path to binary
+        section_name: Name of section to check for (e.g., ".hip_fatbin", ".rocm_kpack_ref")
+        toolchain: Toolchain instance (created if not provided)
+
+    Returns:
+        True if section exists, False otherwise
+
+    Note:
+        This function abstracts binary format tooling (readelf for ELF, etc.)
+        to support cross-platform binary analysis.
+    """
+    if toolchain is None:
+        toolchain = Toolchain()
+
+    try:
+        output = toolchain.exec_capture_text(
+            [toolchain.readelf, "-S", str(binary_path)]
+        )
+        return section_name in output
+    except Exception:
+        return False
+
+
+def get_section_type(
+    binary_path: Path,
+    section_name: str,
+    *,
+    toolchain: Toolchain | None = None,
+) -> str | None:
+    """Get the type of a section in a binary (e.g., PROGBITS, NOBITS).
+
+    Args:
+        binary_path: Path to binary
+        section_name: Name of section (e.g., ".hip_fatbin")
+        toolchain: Toolchain instance (created if not provided)
+
+    Returns:
+        Section type string (e.g., "PROGBITS", "NOBITS"), or None if section doesn't exist
+
+    Note:
+        This function abstracts binary format tooling (readelf for ELF, etc.)
+        to support cross-platform binary analysis.
+    """
+    if toolchain is None:
+        toolchain = Toolchain()
+
+    try:
+        output = toolchain.exec_capture_text(
+            [toolchain.readelf, "-S", str(binary_path)]
+        )
+
+        # Parse section headers to find the type
+        # Format: [Nr] Name              Type             Address           Offset
+        for line in output.splitlines():
+            if section_name in line:
+                parts = line.split()
+                # Check if this is a section header line (starts with [Nr])
+                if len(parts) >= 3 and parts[0].startswith("["):
+                    # Type is at index 2
+                    return parts[2]
+
+        return None
+
+    except Exception:
+        return None

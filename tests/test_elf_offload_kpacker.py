@@ -12,13 +12,23 @@ def test_kpack_fat_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binu
     """Test kpacking a fat binary with .hip_fatbin section."""
     # Use a multi-arch bundled binary
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    marked_binary = tmp_path / "test_kernel_multi_marked.exe"
     output_binary = tmp_path / "test_kernel_multi_kpacked.exe"
 
+    # Add .rocm_kpack_ref section first
+    binutils.add_kpack_ref_marker(
+        input_binary,
+        marked_binary,
+        kpack_search_paths=["test.kpack"],
+        kernel_name="test_kernel",
+        toolchain=toolchain
+    )
+
     # Get original size
-    original_size = input_binary.stat().st_size
+    original_size = marked_binary.stat().st_size
 
     # Kpack
-    result = kpack_offload_binary(input_binary, output_binary, verbose=True)
+    result = kpack_offload_binary(marked_binary, output_binary, toolchain=toolchain, verbose=True)
 
     # Verify output exists
     assert output_binary.exists()
@@ -58,11 +68,21 @@ def test_kpack_fat_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binu
 def test_kpack_shared_library(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
     """Test kpacking a shared library with .hip_fatbin section."""
     input_library = test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_single.so"
+    marked_library = tmp_path / "libtest_kernel_single_marked.so"
     output_library = tmp_path / "libtest_kernel_single_kpacked.so"
 
-    original_size = input_library.stat().st_size
+    # Add .rocm_kpack_ref section first
+    binutils.add_kpack_ref_marker(
+        input_library,
+        marked_library,
+        kpack_search_paths=["test.kpack"],
+        kernel_name="test_kernel",
+        toolchain=toolchain
+    )
 
-    result = kpack_offload_binary(input_library, output_library, verbose=True)
+    original_size = marked_library.stat().st_size
+
+    result = kpack_offload_binary(marked_library, output_library, toolchain=toolchain, verbose=True)
 
     # Verify size reduction
     assert output_library.exists()
@@ -79,21 +99,31 @@ def test_kpack_shared_library(tmp_path: Path, test_assets_dir: Path, toolchain: 
     assert "DYN (Shared object file)" in readelf_result.stdout
 
 
-def test_kpack_host_only_binary(tmp_path: Path, test_assets_dir: Path):
+def test_kpack_host_only_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
     """Test kpacking a binary without .hip_fatbin (should just copy)."""
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/host_only.exe"
+    marked_binary = tmp_path / "host_only_marked.exe"
     output_binary = tmp_path / "host_only_kpacked.exe"
 
-    original_size = input_binary.stat().st_size
+    # Add .rocm_kpack_ref section first
+    binutils.add_kpack_ref_marker(
+        input_binary,
+        marked_binary,
+        kpack_search_paths=["test.kpack"],
+        kernel_name="test_kernel",
+        toolchain=toolchain
+    )
 
-    result = kpack_offload_binary(input_binary, output_binary, verbose=True)
+    original_size = marked_binary.stat().st_size
 
-    # Should just copy the file
+    result = kpack_offload_binary(marked_binary, output_binary, toolchain=toolchain, verbose=True)
+
+    # Binary should be processed (mapping .rocm_kpack_ref adds overhead)
     assert output_binary.exists()
-    assert output_binary.stat().st_size == original_size
-    assert result["removed"] == 0
+    # Mapping the section adds padding, so output may be larger
+    assert result["removed"] <= 0  # No .hip_fatbin to remove, so "removed" is negative (size increased)
     assert result["original_size"] == original_size
-    assert result["new_size"] == original_size
+    assert result["new_size"] == output_binary.stat().st_size
 
 
 def test_kpacker_has_hip_fatbin(test_assets_dir: Path):
@@ -133,25 +163,35 @@ def test_kpacker_calculate_removal_plan(test_assets_dir: Path):
 def test_integration_with_binutils_create_host_only(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
     """Test that BundledBinary.create_host_only() uses the kpacker by default."""
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
+    marked_binary = tmp_path / "libtest_kernel_multi_marked.so"
     output_binary = tmp_path / "libtest_kernel_multi_host_only.so"
 
-    original_size = input_binary.stat().st_size
+    # Add .rocm_kpack_ref section first
+    binutils.add_kpack_ref_marker(
+        input_binary,
+        marked_binary,
+        kpack_search_paths=["test.kpack"],
+        kernel_name="test_kernel",
+        toolchain=toolchain
+    )
 
-    # Create BundledBinary and call create_host_only (should use kpacker by default)
-    bb = binutils.BundledBinary(input_binary, toolchain=toolchain)
-    bb.create_host_only(output_binary, use_objcopy=False)
+    original_size = marked_binary.stat().st_size
+
+    # Create BundledBinary and call create_host_only (uses kpacker)
+    bb = binutils.BundledBinary(marked_binary, toolchain=toolchain)
+    bb.create_host_only(output_binary)
 
     # Verify size reduction (kpacker should actually reduce size)
     assert output_binary.exists()
     new_size = output_binary.stat().st_size
     assert new_size < original_size
 
-    # Compare with objcopy path (should have minimal reduction)
+    # Compare with simple objcopy path (should have minimal reduction)
     output_binary_objcopy = tmp_path / "libtest_kernel_multi_objcopy.so"
-    bb.create_host_only(output_binary_objcopy, use_objcopy=True)
+    bb.remove_section_simple(output_binary_objcopy, ".hip_fatbin")
 
     objcopy_size = output_binary_objcopy.stat().st_size
-    # Neutralizer should remove more bytes than objcopy
+    # Kpacker should remove more bytes than simple objcopy
     kpacker_reduction = original_size - new_size
     objcopy_reduction = original_size - objcopy_size
     assert kpacker_reduction > objcopy_reduction
@@ -160,10 +200,20 @@ def test_integration_with_binutils_create_host_only(tmp_path: Path, test_assets_
 def test_kpacked_binary_compatible_with_objcopy(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
     """Test that objcopy --add-section works on kpacked binaries."""
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    marked_binary = tmp_path / "test_kernel_multi_marked.exe"
     output_binary = tmp_path / "test_kernel_multi_kpacked.exe"
 
+    # Add .rocm_kpack_ref section first
+    binutils.add_kpack_ref_marker(
+        input_binary,
+        marked_binary,
+        kpack_search_paths=["test.kpack"],
+        kernel_name="test_kernel",
+        toolchain=toolchain
+    )
+
     # Neutralize the binary
-    kpack_offload_binary(input_binary, output_binary, verbose=True)
+    kpack_offload_binary(marked_binary, output_binary, toolchain=toolchain, verbose=True)
 
     # Verify kpacked binary exists
     assert output_binary.exists()

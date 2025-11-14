@@ -6,7 +6,24 @@ This module provides utilities for parallelizing CPU-intensive kernel preparatio
 
 import os
 from concurrent.futures import Executor, ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import NamedTuple
+
+from rocm_kpack.kpack import PackedKernelArchive, PreparedKernel
+
+
+class KernelInput(NamedTuple):
+    """Input data for preparing a kernel for packing.
+
+    Attributes:
+        relative_path: Path relative to archive root (e.g., "kernels/my_kernel")
+        gfx_arch: GPU architecture (e.g., "gfx1100")
+        hsaco_data: Raw HSACO binary data
+        metadata: Optional metadata dict to store in TOC
+    """
+    relative_path: str
+    gfx_arch: str
+    hsaco_data: bytes
+    metadata: dict[str, object] | None
 
 
 def get_worker_count(max_workers: int | None = None) -> int:
@@ -29,10 +46,10 @@ def get_worker_count(max_workers: int | None = None) -> int:
 
 
 def parallel_prepare_kernels(
-    archive: Any,
-    kernels: list[tuple[str, str, bytes, dict[str, Any] | None]],
+    archive: PackedKernelArchive,
+    kernels: list[KernelInput],
     executor: Executor | None = None,
-) -> list[Any]:
+) -> list[PreparedKernel]:
     """Prepare multiple kernels in parallel using provided executor.
 
     This is the map phase of map/reduce compression. Each kernel is prepared
@@ -41,7 +58,7 @@ def parallel_prepare_kernels(
 
     Args:
         archive: PackedKernelArchive instance
-        kernels: List of (relative_path, gfx_arch, hsaco_data, metadata) tuples
+        kernels: List of KernelInput objects containing kernel data and metadata
         executor: Executor for parallel execution. If None, runs sequentially.
 
     Returns:
@@ -53,16 +70,16 @@ def parallel_prepare_kernels(
     # Sequential path when no executor provided
     if executor is None:
         return [
-            archive.prepare_kernel(relative_path, gfx_arch, hsaco_data, metadata)
-            for relative_path, gfx_arch, hsaco_data, metadata in kernels
+            archive.prepare_kernel(k.relative_path, k.gfx_arch, k.hsaco_data, k.metadata)
+            for k in kernels
         ]
 
     # Parallel preparation using provided executor
     # Submit all tasks
     future_to_index = {}
-    for i, (relative_path, gfx_arch, hsaco_data, metadata) in enumerate(kernels):
+    for i, k in enumerate(kernels):
         future = executor.submit(
-            archive.prepare_kernel, relative_path, gfx_arch, hsaco_data, metadata
+            archive.prepare_kernel, k.relative_path, k.gfx_arch, k.hsaco_data, k.metadata
         )
         future_to_index[future] = i
 

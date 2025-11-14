@@ -19,6 +19,7 @@ TODO: Windows PE/COFF support will require similar approach with different binar
 """
 
 import os
+import shutil
 import struct
 import sys
 from pathlib import Path
@@ -687,25 +688,35 @@ def kpack_offload_binary(
     original_size = input_path.stat().st_size
     original_mode = input_path.stat().st_mode
 
+    # Check if binary has .hip_fatbin section
+    kpacker = ElfOffloadKpacker(input_path)
+    has_fatbin = kpacker.has_hip_fatbin()
+
     # Temporary files for pipeline
     temp_zeropaged = output_path.with_suffix(output_path.suffix + '.zeropaged')
     temp_mapped = output_path.with_suffix(output_path.suffix + '.mapped')
     temp_pointed = output_path.with_suffix(output_path.suffix + '.pointed')
 
     try:
-        # Phase 1: Zero-page .hip_fatbin section
-        if verbose:
-            print(f"\nPhase 1: Zero-page .hip_fatbin")
+        # Phase 1: Zero-page .hip_fatbin section (skip if no .hip_fatbin)
+        if has_fatbin:
+            if verbose:
+                print(f"\nPhase 1: Zero-page .hip_fatbin")
 
-        success = elf_modify_load.conservative_zero_page(
-            input_path,
-            temp_zeropaged,
-            section_name=".hip_fatbin",
-            verbose=verbose
-        )
+            success = elf_modify_load.conservative_zero_page(
+                input_path,
+                temp_zeropaged,
+                section_name=".hip_fatbin",
+                verbose=verbose
+            )
 
-        if not success:
-            raise RuntimeError("Zero-page optimization failed")
+            if not success:
+                raise RuntimeError("Zero-page optimization failed")
+        else:
+            # No .hip_fatbin section, just copy the file
+            if verbose:
+                print(f"\nPhase 1: No .hip_fatbin section found, skipping zero-page")
+            shutil.copy2(input_path, temp_zeropaged)
 
         # Phase 2: Map .rocm_kpack_ref to new PT_LOAD
         if verbose:
@@ -727,37 +738,44 @@ def kpack_offload_binary(
         if kpack_ref_vaddr is None:
             raise RuntimeError(".rocm_kpack_ref section not found after mapping")
 
-        if verbose:
-            print(f"\nPhase 3: Update __CudaFatBinaryWrapper pointer")
-            print(f"  .rocm_kpack_ref mapped to: 0x{kpack_ref_vaddr:x}")
+        # Phases 3-5 only apply to binaries with .hip_fatbin
+        if has_fatbin:
+            if verbose:
+                print(f"\nPhase 3: Update __CudaFatBinaryWrapper pointer")
+                print(f"  .rocm_kpack_ref mapped to: 0x{kpack_ref_vaddr:x}")
 
-        # Find .hipFatBinSegment section address (contains __CudaFatBinaryWrapper)
-        hipfatbin_segment_vaddr = get_section_vaddr(toolchain, temp_mapped, ".hipFatBinSegment")
-        if hipfatbin_segment_vaddr is None:
-            raise RuntimeError(".hipFatBinSegment section not found")
+            # Find .hipFatBinSegment section address (contains __CudaFatBinaryWrapper)
+            hipfatbin_segment_vaddr = get_section_vaddr(toolchain, temp_mapped, ".hipFatBinSegment")
+            if hipfatbin_segment_vaddr is None:
+                raise RuntimeError(".hipFatBinSegment section not found")
 
-        # Pointer is at offset +8 in __CudaFatBinaryWrapper structure
-        pointer_vaddr = hipfatbin_segment_vaddr + 8
+            # Pointer is at offset +8 in __CudaFatBinaryWrapper structure
+            pointer_vaddr = hipfatbin_segment_vaddr + 8
 
-        # Phase 4: Update pointer to point to .rocm_kpack_ref
-        success = elf_modify_load.set_pointer(
-            temp_mapped,
-            temp_pointed,
-            pointer_vaddr=pointer_vaddr,
-            target_vaddr=kpack_ref_vaddr,
-            update_relocation=True,
-            verbose=verbose
-        )
+            # Phase 4: Update pointer to point to .rocm_kpack_ref
+            success = elf_modify_load.set_pointer(
+                temp_mapped,
+                temp_pointed,
+                pointer_vaddr=pointer_vaddr,
+                target_vaddr=kpack_ref_vaddr,
+                update_relocation=True,
+                verbose=verbose
+            )
 
-        if not success:
-            raise RuntimeError("Failed to set pointer")
+            if not success:
+                raise RuntimeError("Failed to set pointer")
 
-        # Phase 5: Rewrite magic HIPF→HIPK
-        if verbose:
-            print(f"\nPhase 4: Rewrite magic (HIPF → HIPK)")
+            # Phase 5: Rewrite magic HIPF→HIPK
+            if verbose:
+                print(f"\nPhase 4: Rewrite magic (HIPF → HIPK)")
 
-        data = bytearray(temp_pointed.read_bytes())
-        _rewrite_hipfatbin_magic(data, verbose=verbose)
+            data = bytearray(temp_pointed.read_bytes())
+            _rewrite_hipfatbin_magic(data, verbose=verbose)
+        else:
+            # No .hip_fatbin, skip pointer update and magic rewrite
+            if verbose:
+                print(f"\nPhases 3-5: No .hip_fatbin section, skipping pointer update and magic rewrite")
+            data = bytearray(temp_mapped.read_bytes())
 
         # Write final output
         output_path.write_bytes(data)

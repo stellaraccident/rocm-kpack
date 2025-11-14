@@ -598,11 +598,10 @@ class ArtifactSplitter:
             prefix_path = input_dir / prefix
 
             if not prefix_path.exists():
-                raise FileNotFoundError(
-                    f"Prefix directory does not exist: {prefix_path}\n"
-                    f"Artifact manifest lists prefix '{prefix}' that is not present in artifact directory.\n"
-                    f"This indicates a corrupted or incomplete artifact."
-                )
+                # Skip empty prefixes (directories that had no files may not be created in artifact)
+                if self.verbose:
+                    print(f"\nSkipping prefix (directory does not exist): {prefix}")
+                continue
 
             if self.verbose:
                 print(f"\nProcessing prefix: {prefix}")

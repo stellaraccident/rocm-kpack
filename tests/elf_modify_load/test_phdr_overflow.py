@@ -17,7 +17,7 @@ import sys
 # Add rocm_kpack to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "python"))
 
-from rocm_kpack.elf_zero_pages import conservative_zero_page
+from rocm_kpack.elf_modify_load import conservative_zero_page
 
 
 TEST_DIR = Path(__file__).parent

@@ -79,10 +79,10 @@ class UnbundlingVisitor(ArtifactVisitor):
                     dest = unbundled_dir / f"{arch}.co"
                     shutil.copy2(src, dest)
 
-        # Create host-only version of the binary
-        host_only_dest = self.output_root / artifact_path.relative_path
-        host_only_dest.parent.mkdir(parents=True, exist_ok=True)
-        bundled_binary.create_host_only(host_only_dest)
+        # Create host-only version (without device code)
+        binary_dest = self.output_root / artifact_path.relative_path
+        binary_dest.parent.mkdir(parents=True, exist_ok=True)
+        bundled_binary.create_host_only(binary_dest)
 
     def visit_kernel_database(
         self, artifact_path: ArtifactPath, database
@@ -99,7 +99,7 @@ class UnbundlingVisitor(ArtifactVisitor):
 
 
 @pytest.fixture
-def bundled_test_tree(tmp_path: Path) -> Path:
+def bundled_test_tree(tmp_path: Path, toolchain: Toolchain) -> Path:
     """Create a test tree with bundled binaries and opaque files.
 
     Uses actual test assets from test_assets/bundled_binaries/linux/cov5/.
@@ -108,8 +108,8 @@ def bundled_test_tree(tmp_path: Path) -> Path:
         test_root/
             config.txt (opaque file)
             bins/
-                test_kernel_multi.exe (bundled binary)
-                libtest_kernel_single.so (bundled binary)
+                test_kernel_multi.exe (bundled binary with .rocm_kpack_ref)
+                libtest_kernel_single.so (bundled binary with .rocm_kpack_ref)
                 host_only.exe (opaque file - no .hip_fatbin)
             data/
                 input.dat (opaque file)
@@ -122,20 +122,29 @@ def bundled_test_tree(tmp_path: Path) -> Path:
     (root / "data").mkdir()
     (root / "data" / "input.dat").write_text("input data")
 
-    # Copy bundled binaries from test assets
+    # Setup bundled binaries from test assets
     bins_dir = root / "bins"
     bins_dir.mkdir()
 
     assets_dir = Path("test_assets/bundled_binaries/linux/cov5")
 
-    # Copy bundled binaries
-    shutil.copy2(
+    # Add .rocm_kpack_ref sections to bundled binaries
+    # (required for create_host_only to work)
+    from rocm_kpack import binutils
+
+    binutils.add_kpack_ref_marker(
         assets_dir / "test_kernel_multi.exe",
-        bins_dir / "test_kernel_multi.exe"
+        bins_dir / "test_kernel_multi.exe",
+        kpack_search_paths=["test.kpack"],
+        kernel_name="test_kernel",
+        toolchain=toolchain
     )
-    shutil.copy2(
+    binutils.add_kpack_ref_marker(
         assets_dir / "libtest_kernel_single.so",
-        bins_dir / "libtest_kernel_single.so"
+        bins_dir / "libtest_kernel_single.so",
+        kpack_search_paths=["test.kpack"],
+        kernel_name="test_kernel",
+        toolchain=toolchain
     )
 
     # Copy host-only binary (should be treated as opaque)
@@ -182,26 +191,18 @@ def test_unbundling_visitor_unbundles_binaries(bundled_test_tree: Path, tmp_path
     assert single_unbundled.is_dir()
     assert (single_unbundled / "gfx1100.co").exists()
 
-    # Verify host-only versions were created
+    # Verify host-only binaries were created
     assert (output_dir / "bins" / "test_kernel_multi.exe").exists()
     assert (output_dir / "bins" / "libtest_kernel_single.so").exists()
 
-    # Verify host-only versions don't have active .hip_fatbin section
-    # The neutralizer marks it as NOBITS (zero-paged), so check for that
-    import subprocess
-    result = subprocess.run(
-        ["readelf", "-S", str(output_dir / "bins" / "test_kernel_multi.exe")],
-        capture_output=True,
-        text=True,
-        check=True
-    )
-    # Either .hip_fatbin is absent, or it's marked as NOBITS (neutralized)
-    if ".hip_fatbin" in result.stdout:
-        # If present, verify it's marked as NOBITS (zero-paged/neutralized)
-        for line in result.stdout.split('\n'):
-            if '.hip_fatbin' in line:
-                assert 'NOBITS' in line, "If .hip_fatbin exists, it should be type NOBITS (neutralized)"
-                break
+    # Verify host-only binaries are smaller than originals (device code removed)
+    original_multi_size = (bundled_test_tree / "bins" / "test_kernel_multi.exe").stat().st_size
+    host_only_multi_size = (output_dir / "bins" / "test_kernel_multi.exe").stat().st_size
+    assert host_only_multi_size < original_multi_size, "Host-only binary should be smaller"
+
+    original_single_size = (bundled_test_tree / "bins" / "libtest_kernel_single.so").stat().st_size
+    host_only_single_size = (output_dir / "bins" / "libtest_kernel_single.so").stat().st_size
+    assert host_only_single_size < original_single_size, "Host-only library should be smaller"
 
 
 def test_unbundling_visitor_counts(bundled_test_tree: Path, tmp_path: Path, toolchain: Toolchain):

@@ -4,12 +4,12 @@ import shutil
 import threading
 from concurrent.futures import Executor
 from pathlib import Path
-from typing import Any
 
 from rocm_kpack.artifact_scanner import ArtifactPath, ArtifactVisitor
 from rocm_kpack.binutils import BundledBinary, Toolchain, add_kpack_ref_marker
+from rocm_kpack.database_handlers import DatabaseHandler
 from rocm_kpack.kpack import PackedKernelArchive
-from rocm_kpack.parallel import parallel_prepare_kernels
+from rocm_kpack.parallel import KernelInput, parallel_prepare_kernels
 
 
 class PackingVisitor(ArtifactVisitor):
@@ -160,7 +160,9 @@ class PackingVisitor(ArtifactVisitor):
                     hsaco_data = kernel_path.read_bytes()
 
                     # Collect for parallel preparation
-                    kernels_to_prepare.append((kernel_name, arch, hsaco_data, None))
+                    kernels_to_prepare.append(
+                        KernelInput(kernel_name, arch, hsaco_data, None)
+                    )
 
             # Prepare all kernels sequentially (parallelism comes from concurrent binary processing)
             # Note: We must NOT use self.executor here to avoid deadlock - the scanner
@@ -215,7 +217,7 @@ class PackingVisitor(ArtifactVisitor):
                 temp_with_marker.unlink()
 
     def visit_kernel_database(
-        self, artifact_path: ArtifactPath, database: Any
+        self, artifact_path: ArtifactPath, database: DatabaseHandler
     ) -> None:
         """Handle kernel database artifacts.
 

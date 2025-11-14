@@ -368,10 +368,7 @@ class ArtifactScanner:
             if result.returncode == 0:
                 return ".hip_fatbin" in result.stdout
         except FileNotFoundError:
-            # readelf not available
-            pass
-        except Exception:
-            # Unexpected error
+            # readelf not available - fall through to return False
             pass
 
         # For non-ELF files (Windows COFF) or if readelf fails, return False for now

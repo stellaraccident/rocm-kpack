@@ -11,7 +11,7 @@ Compression Scheme Design:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any
+from pathlib import Path
 import struct
 import zstandard as zstd
 
@@ -63,7 +63,7 @@ class Compressor(ABC):
         pass
 
     @abstractmethod
-    def finalize(self, inputs: list[tuple[str, CompressionInput]]) -> tuple[bytes, dict[str, Any]]:
+    def finalize(self, inputs: list[tuple[str, CompressionInput]]) -> tuple[bytes, dict[str, object]]:
         """Reduce phase: compress all kernels with cross-kernel optimization (exclusive).
 
         This method is called once with all prepared inputs. It performs
@@ -85,7 +85,7 @@ class Compressor(ABC):
 
     @staticmethod
     @abstractmethod
-    def from_toc(toc_data: dict[str, Any], file_path: Any) -> "Compressor":
+    def from_toc(toc_data: dict[str, object], file_path: Path) -> "Compressor":
         """Initialize compressor from TOC metadata for reading.
 
         The runtime calls this once when opening a kpack file, then uses
@@ -145,7 +145,7 @@ class NoOpCompressor(Compressor):
         """Store kernel data without compression."""
         return NoOpCompressionInput(data=kernel_data)
 
-    def finalize(self, inputs: list[tuple[str, CompressionInput]]) -> tuple[bytes, dict[str, Any]]:
+    def finalize(self, inputs: list[tuple[str, CompressionInput]]) -> tuple[bytes, dict[str, object]]:
         """Concatenate all kernel data and build blob metadata.
 
         Returns:
@@ -170,7 +170,7 @@ class NoOpCompressor(Compressor):
         return bytes(result), toc_metadata
 
     @staticmethod
-    def from_toc(toc_data: dict[str, Any], file_path: Any) -> "NoOpCompressor":
+    def from_toc(toc_data: dict[str, object], file_path: Path) -> "NoOpCompressor":
         """Initialize from TOC for reading."""
         compressor = NoOpCompressor()
         compressor._file_path = file_path
@@ -252,7 +252,7 @@ class ZstdCompressor(Compressor):
             original_size=len(kernel_data),
         )
 
-    def finalize(self, inputs: list[tuple[str, CompressionInput]]) -> tuple[bytes, dict[str, Any]]:
+    def finalize(self, inputs: list[tuple[str, CompressionInput]]) -> tuple[bytes, dict[str, object]]:
         """Concatenate pre-compressed frames sequentially.
 
         Format:
@@ -290,7 +290,7 @@ class ZstdCompressor(Compressor):
         return bytes(result), toc_metadata
 
     @staticmethod
-    def from_toc(toc_data: dict[str, Any], file_path: Any) -> "ZstdCompressor":
+    def from_toc(toc_data: dict[str, object], file_path: Path) -> "ZstdCompressor":
         """Initialize from TOC for reading."""
         compressor = ZstdCompressor()
         compressor._file_path = file_path
@@ -355,7 +355,7 @@ COMPRESSION_SCHEMES = {
 }
 
 
-def create_compressor_from_toc(toc_data: dict[str, Any], file_path: Any) -> Compressor:
+def create_compressor_from_toc(toc_data: dict[str, object], file_path: Path) -> Compressor:
     """Factory function to create compressor from TOC metadata.
 
     Args:
