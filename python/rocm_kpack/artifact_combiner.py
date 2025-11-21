@@ -39,6 +39,7 @@ class ArtifactCombiner:
         self.collector = collector
         self.manifest_merger = manifest_merger
         self.verbose = verbose
+        self._created_generic_artifacts: set[str] = set()
 
     def combine_component(
         self,
@@ -50,11 +51,15 @@ class ArtifactCombiner:
         """
         Combine artifacts for a component and architecture group.
 
+        This creates two separate artifacts:
+        1. Generic artifact (once per component): Host code only, no .kpack files
+        2. Arch-specific artifact (once per group): .kpack files and arch databases only
+
         Args:
             component_name: Component name (e.g., "rocblas_lib")
             group_name: Package group name (e.g., "gfx110X")
             arch_group: Architecture group configuration
-            output_dir: Output directory for combined artifact
+            output_dir: Output directory for combined artifacts
 
         Raises:
             ValueError: If required artifacts are missing or invalid
@@ -74,98 +79,126 @@ class ArtifactCombiner:
             require_generic=True
         )
 
+        # Determine if this is a generic-only component (no device code)
+        has_device_code = bool(availability.available)
+
         if self.verbose:
             if availability.available:
                 print(f"  Available architectures: {', '.join(availability.available)}")
             if availability.missing:
                 print(f"  Missing architectures: {', '.join(availability.missing)}")
+            if not has_device_code:
+                print(f"  Component has no device code (generic-only)")
 
-        # Create output artifact directory
-        output_artifact_dir = output_dir / f"{component_name}_{group_name}"
-        output_artifact_dir.mkdir(parents=True, exist_ok=True)
+        # Create generic artifact (once per component)
+        if component_name not in self._created_generic_artifacts:
+            generic_output_dir = output_dir / f"{component_name}_generic"
+            generic_output_dir.mkdir(parents=True, exist_ok=True)
+
+            if self.verbose:
+                print(f"  Creating generic artifact: {generic_output_dir}")
+
+            self._create_generic_artifact(generic_artifact, generic_output_dir)
+            self._created_generic_artifacts.add(component_name)
+
+        # Skip arch-specific artifact if component has no device code
+        if not has_device_code:
+            if self.verbose:
+                print(f"  ✓ Generic-only artifact created (no arch-specific artifact needed)")
+            return
+
+        # Create architecture-specific artifact for this group
+        arch_output_dir = output_dir / f"{component_name}_{group_name}"
+        arch_output_dir.mkdir(parents=True, exist_ok=True)
 
         if self.verbose:
-            print(f"  Output artifact: {output_artifact_dir}")
+            print(f"  Creating arch-specific artifact: {arch_output_dir}")
 
-        # Copy generic artifact structure
-        self._copy_generic_artifact(generic_artifact, output_artifact_dir)
-
-        # Copy architecture-specific content for each available architecture
+        # Collect all prefixes from arch-specific artifacts
+        arch_prefixes: set[str] = set()
         for arch in availability.available:
             arch_artifact = self.collector.get_arch_artifact(component_name, arch)
             if arch_artifact is None:
                 # Should not happen since validate_availability returned it as available
                 raise RuntimeError(f"Architecture artifact {arch} unexpectedly missing")
 
-            self._copy_arch_artifact(arch_artifact, output_artifact_dir)
+            arch_prefixes.update(arch_artifact.prefixes)
+            self._copy_arch_content_only(arch_artifact, arch_output_dir)
 
-        # Merge and update .kpm manifests for all prefixes
-        self._merge_manifests_for_artifact(
-            generic_artifact,
+        # Create .kpm manifest for arch-specific artifact
+        self._create_arch_manifest(
+            sorted(arch_prefixes),
             availability.available,
             component_name,
-            output_artifact_dir
+            arch_output_dir
         )
 
-        # Write artifact manifest
-        write_artifact_manifest(output_artifact_dir, generic_artifact.prefixes)
+        # Write artifact manifest for arch-specific artifact
+        write_artifact_manifest(arch_output_dir, sorted(arch_prefixes))
 
         if self.verbose:
-            print(f"  ✓ Combined artifact created successfully")
+            print(f"  ✓ Artifacts created successfully")
 
-    def _copy_generic_artifact(
+    def _create_generic_artifact(
         self,
         generic_artifact: CollectedArtifact,
         output_dir: Path
     ) -> None:
         """
-        Copy generic artifact structure to output directory.
+        Create generic artifact containing only host code (no .kpack files).
 
         This copies all files and directories from the generic artifact,
-        excluding architecture-specific .kpack files which will be added later.
+        excluding .kpack directories which belong in arch-specific artifacts.
 
         Args:
             generic_artifact: Generic artifact to copy
             output_dir: Destination directory
         """
         if self.verbose:
-            print(f"  Copying generic artifact from {generic_artifact.path}")
+            print(f"    Copying generic host code from {generic_artifact.path}")
 
-        # Copy each prefix
+        def ignore_kpack_dirs(dir_path: str, names: list[str]) -> list[str]:
+            """Ignore .kpack directories during copy."""
+            return [name for name in names if name == ".kpack"]
+
+        # Copy each prefix, excluding .kpack directories
         for prefix in generic_artifact.prefixes:
             src_prefix = generic_artifact.path / prefix
             dst_prefix = output_dir / prefix
 
             if not src_prefix.exists():
                 if self.verbose:
-                    print(f"    Skipping missing prefix: {prefix}")
+                    print(f"      Skipping missing prefix: {prefix}")
                 continue
 
             if self.verbose:
-                print(f"    Copying prefix: {prefix}")
+                print(f"      Copying prefix: {prefix}")
 
-            # Copy the entire prefix directory tree
+            # Copy the entire prefix directory tree, excluding .kpack
             if dst_prefix.exists():
                 raise RuntimeError(
                     f"Destination prefix already exists: {dst_prefix}\n"
                     f"This indicates a duplicate copy or previous failed run"
                 )
 
-            shutil.copytree(src_prefix, dst_prefix, symlinks=True)
+            shutil.copytree(src_prefix, dst_prefix, symlinks=True, ignore=ignore_kpack_dirs)
 
             # Validate copy succeeded
             if not dst_prefix.exists():
                 raise RuntimeError(f"Failed to copy generic artifact prefix: {src_prefix} -> {dst_prefix}")
 
-    def _copy_arch_artifact(
+        # Write artifact manifest for generic artifact
+        write_artifact_manifest(output_dir, generic_artifact.prefixes)
+
+    def _copy_arch_content_only(
         self,
         arch_artifact: CollectedArtifact,
         output_dir: Path
     ) -> None:
         """
-        Copy architecture-specific content to output directory.
+        Copy ONLY architecture-specific content (kpack files and arch databases).
 
-        This copies kpack files and architecture-specific database files.
+        This does NOT copy any host code - that belongs in the generic artifact.
 
         Args:
             arch_artifact: Architecture-specific artifact
@@ -176,7 +209,7 @@ class ArtifactCombiner:
             raise ValueError("Architecture artifact has no architecture set")
 
         if self.verbose:
-            print(f"    Copying arch-specific content for {arch}")
+            print(f"      Copying {arch} kpack files and databases")
 
         # Copy each prefix's architecture-specific content
         for prefix in arch_artifact.prefixes:
@@ -196,7 +229,7 @@ class ArtifactCombiner:
                 for kpack_file in src_kpack_dir.glob("*.kpack"):
                     dst_kpack_file = dst_kpack_dir / kpack_file.name
                     if self.verbose:
-                        print(f"      Copying {kpack_file.name}")
+                        print(f"        {kpack_file.name}")
                     shutil.copy2(kpack_file, dst_kpack_file)
 
                     # Validate kpack file was copied successfully
@@ -219,7 +252,7 @@ class ArtifactCombiner:
                 for kpack_file in src_kpack_stage.glob("*.kpack"):
                     dst_kpack_file = dst_kpack_stage / kpack_file.name
                     if self.verbose:
-                        print(f"      Copying {kpack_file.name}")
+                        print(f"        {kpack_file.name}")
                     shutil.copy2(kpack_file, dst_kpack_file)
 
                     # Validate kpack file was copied successfully
@@ -305,43 +338,39 @@ class ArtifactCombiner:
                     f"{src_file.stat().st_size} -> {dst_file.stat().st_size}"
                 )
 
-    def _merge_manifests_for_artifact(
+    def _create_arch_manifest(
         self,
-        generic_artifact: CollectedArtifact,
+        prefixes: list[str],
         architectures: list[str],
         component_name: str,
         output_dir: Path
     ) -> None:
         """
-        Merge .kpm manifests for all prefixes in the artifact.
+        Create .kpm manifests for arch-specific artifact.
 
         Args:
-            generic_artifact: Generic artifact with prefix information
+            prefixes: List of prefixes in the arch-specific artifact
             architectures: List of architectures to include
             component_name: Component name
-            output_dir: Output artifact directory
+            output_dir: Arch-specific artifact directory
         """
         if self.verbose:
-            print(f"  Merging manifests for {len(generic_artifact.prefixes)} prefixes")
+            print(f"      Creating manifests for {len(prefixes)} prefixes")
 
-        for prefix in generic_artifact.prefixes:
+        for prefix in prefixes:
             # Find all .kpm manifests in the output directory for this prefix
             kpack_dir = output_dir / prefix / ".kpack"
             if not kpack_dir.exists():
                 if self.verbose:
-                    print(f"    No .kpack directory in prefix {prefix}, skipping")
+                    print(f"        No .kpack directory in prefix {prefix}, skipping")
                 continue
 
-            # Collect all existing manifests for this component
-            manifests_to_merge: list[PackManifest] = []
-
-            # The manifests from map phase are single-arch
-            # We need to read kpack file info to rebuild the manifest
+            # Build manifest entries from kpack files
             kpack_files = list(kpack_dir.glob("*.kpack"))
 
             if not kpack_files:
                 if self.verbose:
-                    print(f"    No .kpack files in prefix {prefix}, skipping manifest")
+                    print(f"        No .kpack files in prefix {prefix}, skipping manifest")
                 continue
 
             # Build manifest entries from kpack files
@@ -354,14 +383,14 @@ class ArtifactCombiner:
                 name_parts = kpack_file.stem.rsplit("_", 1)
                 if len(name_parts) != 2:
                     if self.verbose:
-                        print(f"    Skipping kpack file with unexpected name: {kpack_file.name}")
+                        print(f"        Skipping kpack file with unexpected name: {kpack_file.name}")
                     continue
 
                 arch = name_parts[1]
 
                 if arch not in architectures:
                     if self.verbose:
-                        print(f"    Skipping kpack for architecture {arch} (not in group)")
+                        print(f"        Skipping kpack for architecture {arch} (not in group)")
                     continue
 
                 # Get file size
@@ -381,20 +410,20 @@ class ArtifactCombiner:
 
             if not kpack_entries:
                 if self.verbose:
-                    print(f"    No valid kpack entries for prefix {prefix}")
+                    print(f"        No valid kpack entries for prefix {prefix}")
                 continue
 
-            # Create merged manifest
-            merged_manifest = PackManifest(
+            # Create manifest
+            manifest = PackManifest(
                 format_version=1,
                 component_name=component_name,
                 prefix=prefix,
                 kpack_files=kpack_entries
             )
 
-            # Write merged manifest
+            # Write manifest
             manifest_path = kpack_dir / f"{component_name}.kpm"
-            merged_manifest.to_file(manifest_path)
+            manifest.to_file(manifest_path)
 
             if self.verbose:
-                print(f"    Created manifest with {len(kpack_entries)} architectures: {prefix}/.kpack/{component_name}.kpm")
+                print(f"        Created manifest with {len(kpack_entries)} architectures: {prefix}/.kpack/{component_name}.kpm")

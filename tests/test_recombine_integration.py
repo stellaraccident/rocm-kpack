@@ -159,7 +159,7 @@ class TestRecombineIntegration:
         assert set(available_archs) == {"gfx1100", "gfx1101", "gfx1102"}
 
     def test_recombine_artifacts(self, tmp_path, create_split_artifacts, sample_config):
-        """Test recombining artifacts into package groups."""
+        """Test recombining artifacts into separate generic and arch-specific packages."""
         # Create split artifacts across shards
         shards_dir = create_split_artifacts(
             "test_lib",
@@ -183,32 +183,48 @@ class TestRecombineIntegration:
         arch_group = sample_config.architecture_groups["gfx110X"]
         combiner.combine_component("test_lib", "gfx110X", arch_group, output_dir)
 
-        # Verify output artifact
-        output_artifact = output_dir / "test_lib_gfx110X"
-        assert output_artifact.exists()
+        # Verify GENERIC artifact was created
+        generic_artifact = output_dir / "test_lib_generic"
+        assert generic_artifact.exists(), "Generic artifact not created"
 
-        # Verify artifact_manifest.txt
-        manifest_file = output_artifact / "artifact_manifest.txt"
-        assert manifest_file.exists()
+        # Verify generic artifact has manifest
+        generic_manifest_file = generic_artifact / "artifact_manifest.txt"
+        assert generic_manifest_file.exists()
 
-        # Verify generic files were copied
-        lib_file = output_artifact / "test/lib/stage/lib/libtest_lib.so"
-        assert lib_file.exists()
+        # Verify generic artifact has host code
+        generic_lib_file = generic_artifact / "test/lib/stage/lib/libtest_lib.so"
+        assert generic_lib_file.exists(), "Generic artifact missing host library"
 
-        # Verify kpack files for each architecture
-        kpack_dir = output_artifact / "test/lib/stage/.kpack"
-        assert kpack_dir.exists()
+        # Verify generic artifact does NOT have .kpack directory
+        generic_kpack_dir = generic_artifact / "test/lib/stage/.kpack"
+        assert not generic_kpack_dir.exists(), "Generic artifact should not contain .kpack directory"
+
+        # Verify ARCH-SPECIFIC artifact was created
+        arch_artifact = output_dir / "test_lib_gfx110X"
+        assert arch_artifact.exists(), "Arch-specific artifact not created"
+
+        # Verify arch artifact has manifest
+        arch_manifest_file = arch_artifact / "artifact_manifest.txt"
+        assert arch_manifest_file.exists()
+
+        # Verify arch artifact does NOT have host code
+        arch_lib_file = arch_artifact / "test/lib/stage/lib/libtest_lib.so"
+        assert not arch_lib_file.exists(), "Arch-specific artifact should not contain host library"
+
+        # Verify arch artifact HAS .kpack files
+        arch_kpack_dir = arch_artifact / "test/lib/stage/.kpack"
+        assert arch_kpack_dir.exists(), "Arch-specific artifact missing .kpack directory"
 
         for arch in ["gfx1100", "gfx1101", "gfx1102"]:
-            kpack_file = kpack_dir / f"test_lib_{arch}.kpack"
+            kpack_file = arch_kpack_dir / f"test_lib_{arch}.kpack"
             assert kpack_file.exists(), f"Missing kpack file for {arch}"
 
-        # Verify merged manifest was created
-        merged_manifest = kpack_dir / "test_lib.kpm"
-        assert merged_manifest.exists()
+        # Verify arch artifact has .kpm manifest
+        kpm_manifest = arch_kpack_dir / "test_lib.kpm"
+        assert kpm_manifest.exists(), "Missing .kpm manifest in arch artifact"
 
-        # Read and verify merged manifest
-        with open(merged_manifest, 'rb') as f:
+        # Read and verify manifest
+        with open(kpm_manifest, 'rb') as f:
             manifest_data = msgpack.unpack(f, raw=False)
 
         assert manifest_data["format_version"] == 1
@@ -218,9 +234,9 @@ class TestRecombineIntegration:
         assert "gfx1101" in manifest_data["kpack_files"]
         assert "gfx1102" in manifest_data["kpack_files"]
 
-        # Verify architecture-specific database files were copied
+        # Verify architecture-specific database files in arch artifact
         for arch in ["gfx1100", "gfx1101", "gfx1102"]:
-            db_file = output_artifact / "test/lib/stage/lib/rocblas/library" / f"TensileLibrary_{arch}.dat"
+            db_file = arch_artifact / "test/lib/stage/lib/rocblas/library" / f"TensileLibrary_{arch}.dat"
             assert db_file.exists(), f"Missing database file for {arch}"
 
     def test_recombine_missing_architecture(self, tmp_path, create_split_artifacts, sample_config):
@@ -246,20 +262,149 @@ class TestRecombineIntegration:
         arch_group = sample_config.architecture_groups["gfx110X"]
         combiner.combine_component("test_lib", "gfx110X", arch_group, output_dir)
 
-        # Verify only 2 kpack files exist
+        # Verify generic artifact exists
+        generic_artifact = output_dir / "test_lib_generic"
+        assert generic_artifact.exists()
+
+        # Verify only 2 kpack files exist in arch artifact
         kpack_dir = output_dir / "test_lib_gfx110X/test/lib/stage/.kpack"
         kpack_files = list(kpack_dir.glob("*.kpack"))
         assert len(kpack_files) == 2
 
-        # Verify merged manifest has only 2 architectures
-        merged_manifest = kpack_dir / "test_lib.kpm"
-        with open(merged_manifest, 'rb') as f:
+        # Verify manifest has only 2 architectures
+        manifest = kpack_dir / "test_lib.kpm"
+        with open(manifest, 'rb') as f:
             manifest_data = msgpack.unpack(f, raw=False)
 
         assert len(manifest_data["kpack_files"]) == 2
         assert "gfx1100" in manifest_data["kpack_files"]
         assert "gfx1101" in manifest_data["kpack_files"]
         assert "gfx1102" not in manifest_data["kpack_files"]
+
+    def test_generic_artifact_created_once(self, tmp_path, create_split_artifacts):
+        """Test that generic artifact is created only once across multiple architecture groups."""
+        # Create config with multiple architecture groups
+        config_data = {
+            "primary_shard": "shard1",
+            "architecture_groups": {
+                "gfx110X": {
+                    "display_name": "ROCm gfx110X",
+                    "architectures": ["gfx1100", "gfx1101"]
+                },
+                "gfx115X": {
+                    "display_name": "ROCm gfx115X",
+                    "architectures": ["gfx1151"]
+                }
+            },
+            "validation": {
+                "error_on_duplicate_device_code": True,
+                "verify_generic_artifacts_match": False,
+                "error_on_missing_architecture": False
+            }
+        }
+
+        config_file = tmp_path / "config.json"
+        import json
+        with open(config_file, "w") as f:
+            json.dump(config_data, f)
+
+        config = PackagingConfig.from_json(config_file)
+
+        # Create split artifacts with architectures from both groups
+        shards_dir = create_split_artifacts(
+            "test_lib",
+            {
+                "shard1": ["gfx1100", "gfx1101", "gfx1151"]
+            }
+        )
+
+        collector = ArtifactCollector(shards_dir, config.primary_shard, verbose=False)
+        collector.collect()
+
+        manifest_merger = ManifestMerger(verbose=False)
+        combiner = ArtifactCombiner(collector, manifest_merger, verbose=False)
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        # Process first group
+        arch_group_1 = config.architecture_groups["gfx110X"]
+        combiner.combine_component("test_lib", "gfx110X", arch_group_1, output_dir)
+
+        # Process second group
+        arch_group_2 = config.architecture_groups["gfx115X"]
+        combiner.combine_component("test_lib", "gfx115X", arch_group_2, output_dir)
+
+        # Verify generic artifact exists (created once)
+        generic_artifact = output_dir / "test_lib_generic"
+        assert generic_artifact.exists()
+
+        # Verify two arch-specific artifacts exist
+        arch_artifact_1 = output_dir / "test_lib_gfx110X"
+        assert arch_artifact_1.exists()
+
+        arch_artifact_2 = output_dir / "test_lib_gfx115X"
+        assert arch_artifact_2.exists()
+
+        # Verify each arch artifact has the correct architectures
+        kpack_dir_1 = arch_artifact_1 / "test/lib/stage/.kpack"
+        kpack_files_1 = list(kpack_dir_1.glob("*.kpack"))
+        assert len(kpack_files_1) == 2  # gfx1100, gfx1101
+
+        kpack_dir_2 = arch_artifact_2 / "test/lib/stage/.kpack"
+        kpack_files_2 = list(kpack_dir_2.glob("*.kpack"))
+        assert len(kpack_files_2) == 1  # gfx1151
+
+    def test_generic_only_component(self, tmp_path, create_split_artifacts, sample_config):
+        """Test that generic-only components (no device code) only create generic artifact."""
+        # Create a component with only generic artifact, no arch-specific artifacts
+        shards_dir = tmp_path / "shards"
+        shards_dir.mkdir()
+
+        component_name = "support_dev"
+        prefix = "test/support/stage"
+
+        # Create shard with only generic artifact
+        shard_dir = shards_dir / "shard1"
+        shard_dir.mkdir()
+
+        # Create generic artifact
+        generic_dir = shard_dir / f"{component_name}_generic"
+        generic_dir.mkdir()
+        write_artifact_manifest(generic_dir, [prefix])
+
+        # Create prefix structure with some host-only files
+        prefix_dir = generic_dir / prefix
+        lib_dir = prefix_dir / "lib"
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "libsupport.a").write_text("Mock static library")
+
+        # Collect artifacts
+        collector = ArtifactCollector(shards_dir, sample_config.primary_shard, verbose=False)
+        collector.collect()
+
+        # Create combiner
+        manifest_merger = ManifestMerger(verbose=False)
+        combiner = ArtifactCombiner(collector, manifest_merger, verbose=False)
+
+        # Recombine
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        arch_group = sample_config.architecture_groups["gfx110X"]
+        combiner.combine_component(component_name, "gfx110X", arch_group, output_dir)
+
+        # Verify ONLY generic artifact was created
+        generic_artifact = output_dir / f"{component_name}_generic"
+        assert generic_artifact.exists(), "Generic artifact not created"
+
+        # Verify NO arch-specific artifact was created
+        arch_artifact = output_dir / f"{component_name}_gfx110X"
+        assert not arch_artifact.exists(), "Arch-specific artifact should not be created for generic-only component"
+
+        # Verify generic artifact has host code
+        lib_file = generic_artifact / prefix / "lib/libsupport.a"
+        assert lib_file.exists(), "Generic artifact missing host library"
 
     def test_collector_validates_availability(self, create_split_artifacts):
         """Test collector validation of architecture availability."""
