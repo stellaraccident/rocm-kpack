@@ -5,6 +5,7 @@ These tests simulate real artifact splitting scenarios with mock data.
 """
 
 import shutil
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from rocm_kpack.artifact_splitter import (
 )
 from rocm_kpack.artifact_utils import read_artifact_manifest, write_artifact_manifest
 from rocm_kpack.database_handlers import RocBLASHandler
+from rocm_kpack.tools.split_artifacts import batch_split, parse_artifact_name
 from rocm_kpack.tools.verify_artifacts import ArtifactVerifier
 
 
@@ -79,7 +81,7 @@ class TestArtifactSplitterIntegration:
 
         # Create splitter with real toolchain
         splitter = ArtifactSplitter(
-            component_name="test_lib",
+            artifact_prefix="test_lib",
             toolchain=toolchain,
             database_handlers=[],
             verbose=True
@@ -135,7 +137,7 @@ class TestArtifactSplitterIntegration:
 
         # Create splitter with real toolchain - run everything live
         splitter = ArtifactSplitter(
-            component_name="test_lib",
+            artifact_prefix="test_lib",
             toolchain=toolchain,
             database_handlers=[],
             verbose=True
@@ -209,7 +211,7 @@ class TestArtifactSplitterIntegration:
         # Create splitter with rocBLAS handler
         rocblas_handler = RocBLASHandler()
         splitter = ArtifactSplitter(
-            component_name="rocblas_lib",
+            artifact_prefix="rocblas_lib",
             toolchain=toolchain,
             database_handlers=[rocblas_handler],
             verbose=True
@@ -256,7 +258,7 @@ class TestArtifactSplitterIntegration:
 
         # Create splitter with real toolchain
         splitter = ArtifactSplitter(
-            component_name="multi_lib",
+            artifact_prefix="multi_lib",
             toolchain=toolchain,
             database_handlers=[],
             verbose=True
@@ -336,7 +338,7 @@ class TestArtifactSplitterIntegration:
     def test_error_handling_missing_input(self, toolchain, tmp_path):
         """Test error handling for missing input directory."""
         splitter = ArtifactSplitter(
-            component_name="test",
+            artifact_prefix="test",
             toolchain=toolchain,
             database_handlers=[],
             verbose=False
@@ -357,7 +359,7 @@ class TestArtifactSplitterIntegration:
         output_dir = tmp_path / "output"
 
         splitter = ArtifactSplitter(
-            component_name="test",
+            artifact_prefix="test",
             toolchain=toolchain,
             database_handlers=[],
             verbose=False
@@ -365,3 +367,105 @@ class TestArtifactSplitterIntegration:
 
         with pytest.raises(FileNotFoundError, match="artifact_manifest.txt not found"):
             splitter.split(input_dir, output_dir)
+
+    def test_batch_split_cli(self, create_test_artifact, toolchain, tmp_path):
+        """Test batch mode split through the CLI interface."""
+        # Create a parent directory with multiple arch-specific artifacts
+        parent_dir = tmp_path / "shard"
+        parent_dir.mkdir()
+
+        # Create several arch-specific artifacts
+        artifacts_to_create = [
+            ("blas_lib_gfx1100", "blas_lib"),
+            ("blas_dev_gfx1100", "blas_dev"),
+            ("fft_lib_gfx1151", "fft_lib"),
+            ("support_dev_generic", None),  # Should be skipped
+        ]
+
+        for artifact_name, _ in artifacts_to_create:
+            artifact_dir = parent_dir / artifact_name
+            artifact_dir.mkdir()
+            write_artifact_manifest(artifact_dir, ["test/stage"])
+
+            # Create some mock files
+            lib_dir = artifact_dir / "test/stage/lib"
+            lib_dir.mkdir(parents=True)
+            (lib_dir / "libtest.so").write_text("mock library")
+
+        # Test parse_artifact_name function
+        assert parse_artifact_name("blas_lib_gfx1100") == "blas_lib"
+        assert parse_artifact_name("support_dev_generic") is None
+        assert parse_artifact_name("fft_lib_gfx1151") == "fft_lib"
+
+        # Create args namespace for batch mode
+        output_dir = tmp_path / "output"
+        args = Namespace(
+            input_dir=parent_dir,
+            output_dir=output_dir,
+            split_databases=None,
+            verbose=False,
+            tmp_dir=tmp_path / "tmp",
+        )
+
+        # Run batch split
+        batch_split(args, toolchain)
+
+        # Verify output artifacts were created
+        # Since we didn't create any fat binaries or database files, only generic artifacts are created
+        assert (output_dir / "blas_lib_generic").exists()
+        assert (output_dir / "blas_dev_generic").exists()
+        assert (output_dir / "fft_lib_generic").exists()
+
+        # Arch-specific artifacts are only created if there's device code (fat binaries or databases)
+        # In this test, we only have text files, so no arch-specific artifacts
+        assert not (output_dir / "blas_lib_gfx1100").exists()
+        assert not (output_dir / "blas_dev_gfx1100").exists()
+        assert not (output_dir / "fft_lib_gfx1151").exists()
+
+        # support_dev_generic should have been skipped (no artifacts created)
+        # Since it ends in _generic, it won't create any output
+        support_artifacts = list(output_dir.glob("support_dev_*"))
+        assert len(support_artifacts) == 0, "support_dev_generic should be skipped"
+
+    def test_batch_split_with_database_handlers(self, create_test_artifact, toolchain, tmp_path):
+        """Test batch mode with database handlers."""
+        # Create parent directory with BLAS artifacts
+        parent_dir = tmp_path / "shard"
+        parent_dir.mkdir()
+
+        # Create blas_lib artifact with database files
+        blas_artifact = parent_dir / "blas_lib_gfx1100"
+        blas_artifact.mkdir()
+        write_artifact_manifest(blas_artifact, ["math-libs/BLAS/rocBLAS/stage"])
+
+        # Create mock library and database files
+        lib_dir = blas_artifact / "math-libs/BLAS/rocBLAS/stage/lib"
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "librocblas.so").write_text("mock library")
+
+        db_dir = lib_dir / "rocblas" / "library"
+        db_dir.mkdir(parents=True)
+        (db_dir / "TensileLibrary_gfx1100.dat").write_text("mock database")
+        (db_dir / "TensileLibrary_gfx1100.co").write_text("mock code object")
+
+        # Create args with database handlers
+        output_dir = tmp_path / "output"
+        args = Namespace(
+            input_dir=parent_dir,
+            output_dir=output_dir,
+            split_databases=["rocblas"],
+            verbose=False,
+            tmp_dir=tmp_path / "tmp",
+        )
+
+        # Run batch split
+        batch_split(args, toolchain)
+
+        # Verify artifacts were created
+        assert (output_dir / "blas_lib_generic").exists()
+        assert (output_dir / "blas_lib_gfx1100").exists()
+
+        # Verify database files were moved to arch-specific artifact
+        arch_db_path = output_dir / "blas_lib_gfx1100/math-libs/BLAS/rocBLAS/stage/lib/rocblas/library"
+        assert (arch_db_path / "TensileLibrary_gfx1100.dat").exists()
+        assert (arch_db_path / "TensileLibrary_gfx1100.co").exists()

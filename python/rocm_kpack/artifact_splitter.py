@@ -158,19 +158,19 @@ class GenericCopyVisitor:
 class ArtifactSplitter:
     """Splits TheRock artifacts into generic and architecture-specific components."""
 
-    def __init__(self, component_name: str, toolchain: Toolchain,
+    def __init__(self, artifact_prefix: str, toolchain: Toolchain,
                  database_handlers: Optional[List[DatabaseHandler]] = None,
                  verbose: bool = False):
         """
         Initialize the artifact splitter.
 
         Args:
-            component_name: Name of the component (e.g., 'hip_lib', 'rocblas_lib')
+            artifact_prefix: Artifact prefix name_component (e.g., 'hip_lib', 'blas_lib')
             toolchain: Toolchain instance for binary operations
             database_handlers: Optional list of DatabaseHandler instances for kernel databases
             verbose: Enable verbose output
         """
-        self.component_name = component_name
+        self.artifact_prefix = artifact_prefix
         self.toolchain = toolchain
         self.database_handlers = database_handlers or []
         self.verbose = verbose
@@ -185,7 +185,7 @@ class ArtifactSplitter:
             prefix_root: Root of the prefix (where .kpack/ directory will be)
 
         Returns:
-            Relative path from binary to .kpack/{component_name}.kpm
+            Relative path from binary to .kpack/{artifact_prefix}.kpm
         """
         # Get the relative path from prefix root to binary
         rel_path = binary_path.relative_to(prefix_root)
@@ -196,11 +196,11 @@ class ArtifactSplitter:
         # Build the relative path to .kpack directory
         if depth == 0:
             # Binary is at prefix root
-            manifest_path = f".kpack/{self.component_name}.kpm"
+            manifest_path = f".kpack/{self.artifact_prefix}.kpm"
         else:
             # Binary is in subdirectories
             up_path = "/".join([".."] * depth)
-            manifest_path = f"{up_path}/.kpack/{self.component_name}.kpm"
+            manifest_path = f"{up_path}/.kpack/{self.artifact_prefix}.kpm"
 
         if self.verbose:
             print(f"  Binary at: {rel_path}")
@@ -333,7 +333,7 @@ class ArtifactSplitter:
                     print(f"    - {count} kernels from {prefix}")
 
             # Create architecture-specific artifact directory
-            arch_artifact_name = f"{self.component_name}_{arch}"
+            arch_artifact_name = f"{self.artifact_prefix}_{arch}"
             arch_artifact_dir = output_dir / arch_artifact_name
 
             # Create the synthetic kpack prefix
@@ -345,12 +345,12 @@ class ArtifactSplitter:
             kpack_dir.mkdir(parents=True, exist_ok=True)
 
             # Create kpack archive - single file for all kernels from all prefixes
-            kpack_file = kpack_dir / f"{self.component_name}_{arch}.kpack"
+            kpack_file = kpack_dir / f"{self.artifact_prefix}_{arch}.kpack"
 
             # Create PackedKernelArchive instance
             # Use the specific architecture directly, no family grouping
             archive = PackedKernelArchive(
-                group_name=self.component_name,
+                group_name=self.artifact_prefix,
                 gfx_arch_family=arch,  # Use specific arch, not family
                 gfx_arches=[arch]
             )
@@ -429,12 +429,12 @@ class ArtifactSplitter:
             kpack_dir.mkdir(parents=True, exist_ok=True)
 
             # Create the manifest file that lists available kpack files
-            manifest_path = kpack_dir / f"{self.component_name}.kpm"
+            manifest_path = kpack_dir / f"{self.artifact_prefix}.kpm"
 
             # Build manifest data according to design doc format
             manifest_data = {
                 "format_version": 1,
-                "component_name": self.component_name,
+                "component_name": self.artifact_prefix,
                 "prefix": prefix,  # The prefix this manifest belongs to
                 "kpack_files": {}
             }
@@ -486,7 +486,7 @@ class ArtifactSplitter:
                         binary_path=binary_path,
                         output_path=temp_marked,
                         kpack_search_paths=[manifest_relpath],  # Manifest path
-                        kernel_name=self.component_name,  # Component name instead of binary path
+                        kernel_name=self.artifact_prefix,  # Component name instead of binary path
                         toolchain=self.toolchain
                     )
 
@@ -531,7 +531,7 @@ class ArtifactSplitter:
         """
         for arch, file_handler_pairs in database_files_by_arch.items():
             # Create architecture-specific artifact directory
-            arch_artifact_name = f"{self.component_name}_{arch}"
+            arch_artifact_name = f"{self.artifact_prefix}_{arch}"
             arch_artifact_dir = output_dir / arch_artifact_name
             arch_prefix_dir = arch_artifact_dir / prefix
 
@@ -617,7 +617,7 @@ class ArtifactSplitter:
                 )
 
             # Phase 3: Create generic artifact (excluding database files)
-            generic_artifact_name = f"{self.component_name}_generic"
+            generic_artifact_name = f"{self.artifact_prefix}_generic"
             generic_artifact_dir = output_dir / generic_artifact_name
             generic_prefix_dir = generic_artifact_dir / prefix
 
@@ -659,7 +659,7 @@ class ArtifactSplitter:
 
         # Phase 6: Inject kpack references and strip device code from fat binaries
         if fat_binaries_by_prefix and kpack_info_by_arch:
-            generic_artifact_dir = output_dir / f"{self.component_name}_generic"
+            generic_artifact_dir = output_dir / f"{self.artifact_prefix}_generic"
             self.inject_kpack_references(
                 fat_binaries_by_prefix, generic_artifact_dir, kpack_info_by_arch
             )

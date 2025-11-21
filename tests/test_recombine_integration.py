@@ -1,6 +1,7 @@
 """Integration tests for artifact recombination."""
 
 import json
+import shutil
 from pathlib import Path
 
 import msgpack
@@ -304,7 +305,6 @@ class TestRecombineIntegration:
         }
 
         config_file = tmp_path / "config.json"
-        import json
         with open(config_file, "w") as f:
             json.dump(config_data, f)
 
@@ -475,7 +475,6 @@ class TestRecombineIntegration:
         # Let me test the actual duplicate scenario instead
 
         # Remove second artifact
-        import shutil
         shutil.rmtree(generic_dir_2)
 
         # Create exact duplicate by copying
