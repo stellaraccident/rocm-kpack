@@ -1,20 +1,5 @@
 # Tutorial: Splitting and Recombining ROCm Artifacts
 
-> **⚠️ DISCLAIMER**: This tutorial represents the QA plan for the artifact split/recombine workflow. Not all functionality is working properly yet. Future revisions will address known issues and improve the process.
-
-## Known Issues to Address
-
-1. **Generic vs Arch-Specific Artifact Separation**: Currently, the recombined artifacts place host code (e.g., `librocblas.so`) in arch-specific artifacts like `blas_lib_gfx110X`. The correct behavior should be:
-   - **Generic artifact** (`blas_lib_generic`): Contains host code (shared libraries with `.rocm_kpack_ref` markers)
-   - **Arch-specific artifacts** (`blas_lib_gfx110X`, etc.): Contains only `.kpack` files and architecture-specific database files
-
-   This needs to be fixed in the recombination tooling to properly separate generic from arch-specific content.
-
-2. **Generic-Only Artifacts**: Components that have no architecture-specific device code (e.g., `support_dev`, `support_doc`) currently produce empty arch-specific artifacts. The tooling needs to handle these cases by:
-   - Detecting when a component has no arch-specific content
-   - Either skipping arch-specific artifact creation or clearly marking them as generic-only
-   - Ensuring downstream packaging understands which artifacts are truly generic
-
 ## Overview
 
 The ROCm build system produces **fat binary** artifacts containing GPU kernels for multiple architectures embedded in shared libraries. For distribution, these need to be:
@@ -45,8 +30,8 @@ export RUN_ID=your-github-run-id
 # Activate Python virtual environment
 source /path/to/your/venv/bin/activate
 
-# Locate clang-offload-bundler
-BUNDLER=$(find /path/to/rocm/install -name "clang-offload-bundler" | head -1)
+# Locate clang-offload-bundler (usually in rocm installation)
+BUNDLER=$(find ~/rocm -name "clang-offload-bundler" 2>/dev/null | head -1)
 echo "Using bundler: $BUNDLER"
 ```
 
@@ -84,9 +69,9 @@ mkdir -p /develop/tmp/discovery/gfx110X-build
 
 # Split blas_lib from first shard to discover architectures
 python python/rocm_kpack/tools/split_artifacts.py \
-  --input-dir /develop/artifacts/gfx110X-build/blas_lib_gfx110X-dgpu \
+  --artifact-dir /develop/artifacts/gfx110X-build/blas_lib_gfx110X-dgpu \
   --output-dir /develop/tmp/discovery/gfx110X-build \
-  --component-name blas_lib \
+  --artifact-prefix blas_lib \
   --tmp-dir /develop/tmp \
   --split-databases rocblas hipblaslt \
   --clang-offload-bundler "$BUNDLER" \
@@ -94,7 +79,7 @@ python python/rocm_kpack/tools/split_artifacts.py \
 
 # Check what architectures were discovered
 ls /develop/tmp/discovery/gfx110X-build/
-# Output: blas_lib_generic blas_lib_gfx1100 blas_lib_gfx1101 blas_lib_gfx1102 blas_lib_gfx906
+# Output: blas_lib_generic blas_lib_gfx1100 blas_lib_gfx1101 blas_lib_gfx1102
 ```
 
 Repeat for other shards:
@@ -103,37 +88,34 @@ Repeat for other shards:
 # Discover architectures in gfx1151-build
 mkdir -p /develop/tmp/discovery/gfx1151-build
 python python/rocm_kpack/tools/split_artifacts.py \
-  --input-dir /develop/artifacts/gfx1151-build/blas_lib_gfx1151 \
+  --artifact-dir /develop/artifacts/gfx1151-build/blas_lib_gfx1151 \
   --output-dir /develop/tmp/discovery/gfx1151-build \
-  --component-name blas_lib \
+  --artifact-prefix blas_lib \
   --tmp-dir /develop/tmp \
   --split-databases rocblas hipblaslt \
   --clang-offload-bundler "$BUNDLER"
 
 ls /develop/tmp/discovery/gfx1151-build/
-# Output: blas_lib_generic blas_lib_gfx1151 blas_lib_gfx906
+# Output: blas_lib_generic blas_lib_gfx1151
 
 # Discover architectures in gfx120X-build
 mkdir -p /develop/tmp/discovery/gfx120X-build
 python python/rocm_kpack/tools/split_artifacts.py \
-  --input-dir /develop/artifacts/gfx120X-build/blas_lib_gfx120X-all \
+  --artifact-dir /develop/artifacts/gfx120X-build/blas_lib_gfx120X-all \
   --output-dir /develop/tmp/discovery/gfx120X-build \
-  --component-name blas_lib \
+  --artifact-prefix blas_lib \
   --tmp-dir /develop/tmp \
   --split-databases rocblas hipblaslt \
   --clang-offload-bundler "$BUNDLER"
 
 ls /develop/tmp/discovery/gfx120X-build/
-# Output: blas_lib_generic blas_lib_gfx1200 blas_lib_gfx1201 blas_lib_gfx906
+# Output: blas_lib_generic blas_lib_gfx1200 blas_lib_gfx1201
 ```
 
 **Discovered Architectures:**
 - **gfx110X-build**: gfx1100, gfx1101, gfx1102
 - **gfx1151-build**: gfx1151
 - **gfx120X-build**: gfx1200, gfx1201
-
-**Known Issue - gfx906 Fallback Bug:**
-All shards contain `gfx906` artifacts. This is a build system bug where clang defaults to gfx906 when libraries don't support the requested architectures. These should be ignored for now and will need to be fixed in the build system later.
 
 ## Step 3: Create Packaging Configuration
 
@@ -182,111 +164,57 @@ EOF
 
 ## Step 4: Split All Artifacts
 
-Create a script to split all artifacts from each shard systematically:
+Use batch mode to split all artifacts from each shard:
 
 ```bash
-cat > /develop/tmp/split-all.sh << 'EOF'
-#!/bin/bash
-set -e
+# Split all artifacts from gfx110X-build shard
+python python/rocm_kpack/tools/split_artifacts.py \
+  --batch-artifact-parent-dir /develop/artifacts/gfx110X-build \
+  --output-dir /develop/tmp/split-artifacts/gfx110X-build \
+  --split-databases rocblas hipblaslt \
+  --tmp-dir /develop/tmp \
+  --clang-offload-bundler "$BUNDLER" \
+  --verbose
 
-BUNDLER="/home/stella/workspace/rocm/gfx1100/lib/llvm/bin/clang-offload-bundler"
-TMP_DIR="/develop/tmp"
+# Split all artifacts from gfx1151-build shard
+python python/rocm_kpack/tools/split_artifacts.py \
+  --batch-artifact-parent-dir /develop/artifacts/gfx1151-build \
+  --output-dir /develop/tmp/split-artifacts/gfx1151-build \
+  --split-databases rocblas hipblaslt \
+  --tmp-dir /develop/tmp \
+  --clang-offload-bundler "$BUNDLER" \
+  --verbose
 
-# Function to split all arch-specific artifacts from a shard
-split_shard() {
-    local shard_name=$1
-    local shard_dir="/develop/artifacts/${shard_name}"
-    local output_dir="/develop/tmp/split-artifacts/${shard_name}"
-
-    echo "========================================="
-    echo "Splitting artifacts from ${shard_name}"
-    echo "========================================="
-
-    source /develop/therock-venv/bin/activate
-    mkdir -p "$output_dir"
-
-    local total=0
-    local success=0
-
-    for artifact_dir in "$shard_dir"/*; do
-        [ ! -d "$artifact_dir" ] && continue
-        local artifact_name=$(basename "$artifact_dir")
-
-        # Skip generic artifacts (host-* prefix or _generic suffix)
-        if [[ "$artifact_name" == host-* ]] || [[ "$artifact_name" == *_generic ]]; then
-            continue
-        fi
-
-        # Skip if doesn't contain architecture suffix
-        if [[ ! "$artifact_name" =~ gfx[0-9] ]]; then
-            continue
-        fi
-
-        # Extract component name by removing architecture suffix
-        local component_name=$(echo "$artifact_name" | sed 's/_gfx[0-9].*$//')
-
-        total=$((total + 1))
-        echo "[$total] Processing: $artifact_name (component: $component_name)"
-
-        # Determine database splitting requirements
-        local db_args=""
-        if [[ "$component_name" == blas_* ]]; then
-            db_args="--split-databases rocblas hipblaslt"
-        fi
-
-        # Run split
-        if python /develop/rocm-kpack/python/rocm_kpack/tools/split_artifacts.py \
-            --input-dir "$artifact_dir" \
-            --output-dir "$output_dir" \
-            --component-name "$component_name" \
-            --tmp-dir "$TMP_DIR" \
-            $db_args \
-            --clang-offload-bundler "$BUNDLER" \
-            2>&1 | grep -q "Splitting complete"; then
-            success=$((success + 1))
-            echo "    ✓ Success"
-        else
-            echo "    ✗ Failed"
-        fi
-    done
-
-    echo "Summary: $success/$total succeeded"
-    echo ""
-}
-
-# Split all three shards
-split_shard "gfx110X-build"
-split_shard "gfx1151-build"
-split_shard "gfx120X-build"
-EOF
-
-chmod +x /develop/tmp/split-all.sh
-/develop/tmp/split-all.sh
+# Split all artifacts from gfx120X-build shard
+python python/rocm_kpack/tools/split_artifacts.py \
+  --batch-artifact-parent-dir /develop/artifacts/gfx120X-build \
+  --output-dir /develop/tmp/split-artifacts/gfx120X-build \
+  --split-databases rocblas hipblaslt \
+  --tmp-dir /develop/tmp \
+  --clang-offload-bundler "$BUNDLER" \
+  --verbose
 ```
 
-This will process all architecture-specific artifacts from all three shards. Expected output:
-- **gfx110X-build**: ~54 artifacts
-- **gfx1151-build**: ~54 artifacts
-- **gfx120X-build**: ~54 artifacts
+**What Batch Mode Does:**
 
-**What Split Does:**
-
-For each artifact:
-1. Scans for fat binaries (shared libraries with embedded GPU code)
-2. Unbundles GPU kernels using `clang-offload-bundler`
-3. Creates `.kpack` archive files per architecture
-4. Strips GPU code from shared libraries (PROGBITS → NOBITS)
-5. Adds `.rocm_kpack_ref` marker pointing to `.kpack` files
-6. For databases (rocBLAS, hipBLASLt): separates by architecture
-7. Creates generic artifact (host code + markers)
-8. Creates arch-specific artifacts (GPU kernels + databases)
+For each arch-specific artifact in the shard directory:
+1. Auto-detects artifact prefix from directory name (`blas_lib_gfx110X-dgpu` → `blas_lib`)
+2. Skips generic artifacts (artifacts ending in `_generic`)
+3. Scans for fat binaries (shared libraries with embedded GPU code)
+4. Unbundles GPU kernels using `clang-offload-bundler`
+5. Creates `.kpack` archive files per architecture
+6. Strips GPU code from shared libraries (PROGBITS → NOBITS)
+7. Adds `.rocm_kpack_ref` marker pointing to `.kpack` files
+8. For databases (rocBLAS, hipBLASLt): separates by architecture
+9. Creates **generic artifact** (host code + markers, NO .kpack files)
+10. Creates **arch-specific artifacts** (ONLY GPU kernels + databases, NO host libraries)
 
 **Output Structure:**
 ```
 /develop/tmp/split-artifacts/
 ├── gfx110X-build/
-│   ├── blas_lib_generic/           # Host code, no GPU kernels
-│   ├── blas_lib_gfx1100/           # gfx1100 GPU kernels + databases
+│   ├── blas_lib_generic/           # Host code ONLY, no GPU kernels
+│   ├── blas_lib_gfx1100/           # gfx1100 GPU kernels + databases ONLY
 │   ├── blas_lib_gfx1101/
 │   ├── blas_lib_gfx1102/
 │   ├── fft_lib_generic/
@@ -331,8 +259,6 @@ python python/rocm_kpack/tools/verify_artifacts.py \
 3. ✓ Architecture separation (no cross-contamination)
 4. ✓ Kpack archives valid (KPAK magic, MessagePack TOC)
 
-**Note**: The "Fat Binary Conversion" check may show as failed with "0 binaries found" - this is expected and not a real failure. The conversion happens during splitting, not post-processing.
-
 ## Step 6: Recombine into Package Groups
 
 Combine split artifacts from all shards according to the packaging configuration:
@@ -348,58 +274,76 @@ python python/rocm_kpack/tools/recombine_artifacts.py \
 **What Recombine Does:**
 
 For each component and each architecture group:
-1. Copies generic artifact from primary shard (gfx110X-build)
-2. Collects arch-specific artifacts from all shards
-3. Copies `.kpack` files for all architectures in the group
-4. Copies architecture-specific database files
-5. Merges `.kpm` manifest files
-6. Creates final combined artifact
+1. Creates **generic artifact** (once per component):
+   - Copies generic artifact from primary shard
+   - Contains host shared libraries with `.rocm_kpack_ref` markers
+   - NO .kpack files or architecture-specific databases
+
+2. Creates **arch-specific artifacts** (one per architecture group):
+   - Collects arch-specific artifacts from all shards
+   - Copies `.kpack` files for all architectures in the group
+   - Copies architecture-specific database files
+   - Merges `.kpm` manifest files
+   - NO host shared libraries
 
 **Output:**
 ```
 /develop/tmp/recombined-artifacts/
-├── blas_lib_gfx110X/      # Contains gfx1100, gfx1101, gfx1102 kernels
-├── blas_lib_gfx115X/      # Contains gfx1151 kernels
-├── blas_lib_gfx120X/      # Contains gfx1200, gfx1201 kernels
+├── blas_lib_generic/      # Host code only (shared across all architectures)
+├── blas_lib_gfx110X/      # gfx1100, gfx1101, gfx1102 kernels + databases
+├── blas_lib_gfx115X/      # gfx1151 kernels + databases
+├── blas_lib_gfx120X/      # gfx1200, gfx1201 kernels + databases
+├── fft_lib_generic/
 ├── fft_lib_gfx110X/
 ├── fft_lib_gfx115X/
 ├── fft_lib_gfx120X/
-└── ...                     # 105 total (35 components × 3 groups)
+└── ...
 ```
 
-**Current Behavior (INCORRECT - See Known Issues):**
-Each recombined artifact currently contains:
-- Generic (host) shared libraries with `.rocm_kpack_ref` markers
-- `.kpack` files for all architectures in the group
-- `.kpm` manifest listing all kpack files
-- Architecture-specific database files
-
-**Expected Behavior (TO BE IMPLEMENTED):**
-- **Generic artifact** (`blas_lib_generic`): Host shared libraries only
-- **Arch-specific artifacts** (`blas_lib_gfx110X`, etc.): `.kpack` files and arch databases only
+Each final package deployment requires:
+- ONE generic artifact (e.g., `blas_lib_generic`)
+- ONE arch-specific artifact for the target GPU (e.g., `blas_lib_gfx110X`)
 
 ## Step 7: Inspect Results
 
-Examine a recombined artifact to understand the structure:
+Examine a recombined artifact to verify correct separation:
 
 ```bash
-# Check blas_lib for RDNA3 (gfx110X) - Note: Structure shown is CURRENT, not CORRECT
-tree -L 4 /develop/tmp/recombined-artifacts/blas_lib_gfx110X/
+# Check generic artifact structure
+tree -L 4 /develop/tmp/recombined-artifacts/blas_lib_generic/
 
-# Current Output (INCORRECT - host code should be in generic artifact):
-# blas_lib_gfx110X/
+# Expected Output:
+# blas_lib_generic/
 # ├── artifact_manifest.txt
 # └── math-libs/
 #     └── BLAS/
 #         ├── rocBLAS/
 #         │   └── stage/
-#         │       ├── .kpack/
-#         │       │   ├── blas_lib_gfx1100.kpack
-#         │       │   ├── blas_lib_gfx1101.kpack
-#         │       │   ├── blas_lib_gfx1102.kpack
-#         │       │   └── blas_lib.kpm
 #         │       └── lib/
-#         │           ├── librocblas.so.5.2  # ← WRONG: Should be in generic artifact
+#         │           └── librocblas.so.5.2  # Host library with .rocm_kpack_ref marker
+#         └── hipBLASLt/
+#             └── stage/
+#                 └── lib/
+#                     └── libhipblaslt.so.0.9
+
+# Check arch-specific artifact structure
+tree -L 5 /develop/tmp/recombined-artifacts/blas_lib_gfx110X/
+
+# Expected Output:
+# blas_lib_gfx110X/
+# ├── artifact_manifest.txt
+# ├── kpack/
+# │   └── stage/
+# │       └── .kpack/
+# │           ├── blas_lib_gfx1100.kpack
+# │           ├── blas_lib_gfx1101.kpack
+# │           ├── blas_lib_gfx1102.kpack
+# │           └── blas_lib.kpm
+# └── math-libs/
+#     └── BLAS/
+#         ├── rocBLAS/
+#         │   └── stage/
+#         │       └── lib/
 #         │           └── rocblas/library/
 #         │               ├── TensileLibrary_*_gfx1100.dat
 #         │               ├── TensileLibrary_*_gfx1101.dat
@@ -408,18 +352,29 @@ tree -L 4 /develop/tmp/recombined-artifacts/blas_lib_gfx110X/
 #             └── ...
 
 # Check manifest
+cat /develop/tmp/recombined-artifacts/blas_lib_generic/artifact_manifest.txt
 cat /develop/tmp/recombined-artifacts/blas_lib_gfx110X/artifact_manifest.txt
 
 # Inspect .kpm manifest (MessagePack format)
 python -c "
 import msgpack
-with open('/develop/tmp/recombined-artifacts/blas_lib_gfx110X/math-libs/BLAS/rocBLAS/stage/.kpack/blas_lib.kpm', 'rb') as f:
+with open('/develop/tmp/recombined-artifacts/blas_lib_gfx110X/kpack/stage/.kpack/blas_lib.kpm', 'rb') as f:
     manifest = msgpack.unpack(f, raw=False)
     print('Component:', manifest['component_name'])
     print('Architectures:', list(manifest['kpack_files'].keys()))
     for arch, entry in manifest['kpack_files'].items():
-        print(f'  {arch}: {entry[\"filename\"]} ({entry[\"size\"]} bytes, {entry[\"kernel_count\"]} kernels)')
+        print(f'  {arch}: {entry[\"file\"]} ({entry[\"size\"]} bytes, {entry[\"kernel_count\"]} kernels)')
 "
+
+# Verify generic artifact has NO .kpack files
+echo "Checking generic artifact has no .kpack files:"
+find /develop/tmp/recombined-artifacts/blas_lib_generic -name "*.kpack" | wc -l
+# Expected: 0
+
+# Verify arch-specific artifact has NO host libraries (outside kpack reference structure)
+echo "Checking arch-specific artifact has no host libraries:"
+find /develop/tmp/recombined-artifacts/blas_lib_gfx110X -name "*.so*" | grep -v ".kpack" | wc -l
+# Expected: 0
 ```
 
 ## Common Issues and Solutions
@@ -430,7 +385,7 @@ with open('/develop/tmp/recombined-artifacts/blas_lib_gfx110X/math-libs/BLAS/roc
 
 **Solution**: Specify path explicitly with `--clang-offload-bundler` flag:
 ```bash
-find /path/to/rocm -name "clang-offload-bundler"
+find ~/rocm -name "clang-offload-bundler" 2>/dev/null
 # Use the path in your split command
 ```
 
@@ -445,12 +400,6 @@ find /path/to/rocm -name "clang-offload-bundler"
 - Temporary files: ~10 GB
 
 Use `/develop/tmp` for temporary files (not `/tmp`) per CLAUDE.md instructions.
-
-### Issue: gfx906 artifacts everywhere
-
-**Problem**: All shards produce gfx906 artifacts unexpectedly.
-
-**Explanation**: This is a known build system bug. When a library doesn't support the requested architectures, clang defaults to gfx906. These artifacts should be excluded from package groups for now. The build system needs to be fixed to handle this properly.
 
 ### Issue: Binary not stripped or grew in size
 
@@ -482,6 +431,7 @@ Plain text file listing installation prefixes (one per line):
 ```
 math-libs/BLAS/rocBLAS/stage
 math-libs/BLAS/hipBLASLt/stage
+kpack/stage
 ```
 
 ### .kpack (Kernel Pack Archive)
@@ -496,11 +446,10 @@ MessagePack format listing available kpack files:
 {
   'format_version': 1,
   'component_name': 'blas_lib',
-  'prefix': 'math-libs/BLAS/rocBLAS/stage',
+  'prefix': 'kpack/stage',
   'kpack_files': {
     'gfx1100': {
-      'architecture': 'gfx1100',
-      'filename': 'blas_lib_gfx1100.kpack',
+      'file': 'blas_lib_gfx1100.kpack',
       'size': 3456789,
       'kernel_count': 3
     },
