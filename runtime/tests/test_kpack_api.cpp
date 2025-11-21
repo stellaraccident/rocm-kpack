@@ -18,48 +18,27 @@ TEST(KpackAPITest, NullArguments) {
   err = kpack_open("/tmp/test.kpack", nullptr);
   EXPECT_EQ(err, KPACK_ERROR_INVALID_ARGUMENT);
 
-  // kpack_get_architectures with NULL archive
-  char** arches;
+  // kpack_get_architecture_count with NULL archive
   size_t count;
-  err = kpack_get_architectures(nullptr, &arches, &count);
+  err = kpack_get_architecture_count(nullptr, &count);
   EXPECT_EQ(err, KPACK_ERROR_INVALID_ARGUMENT);
 
   // kpack_get_kernel with NULL arguments
-  void* data;
+  const void* data;
   size_t size;
   err = kpack_get_kernel(nullptr, "test", "gfx1100", &data, &size);
   EXPECT_EQ(err, KPACK_ERROR_INVALID_ARGUMENT);
 }
 
-// Test not implemented stubs
-TEST(KpackAPITest, NotImplemented) {
+// Test file not found
+TEST(KpackAPITest, FileNotFound) {
   kpack_archive_t archive;
   kpack_error_t err = kpack_open("/nonexistent/test.kpack", &archive);
-  EXPECT_EQ(err, KPACK_ERROR_NOT_IMPLEMENTED);
+  EXPECT_EQ(err, KPACK_ERROR_FILE_NOT_FOUND);
 }
 
 // Test kpack_close with NULL (should not crash)
 TEST(KpackAPITest, CloseNull) {
   kpack_close(nullptr);
   // Should not crash
-}
-
-// Test kpack_free_string_array with NULL (should not crash)
-TEST(KpackAPITest, FreeStringArrayNull) {
-  kpack_free_string_array(nullptr, 0);
-  // Should not crash
-}
-
-// Test kpack_free_kernel with NULL (should not crash)
-TEST(KpackAPITest, FreeKernelNull) {
-  kpack_free_kernel(nullptr, nullptr);
-  // Should not crash
-}
-
-// Test that error codes are returned correctly
-TEST(KpackAPITest, ErrorCodes) {
-  // Test NOT_IMPLEMENTED for unimplemented functions
-  kpack_archive_t archive;
-  kpack_error_t err = kpack_open("/nonexistent/test.kpack", &archive);
-  EXPECT_EQ(err, KPACK_ERROR_NOT_IMPLEMENTED);
 }

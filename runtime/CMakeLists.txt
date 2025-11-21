@@ -39,6 +39,18 @@ set_target_properties(rocm_kpack PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
 )
 
+# AddressSanitizer support
+option(ENABLE_ASAN "Enable AddressSanitizer for memory error detection" OFF)
+if(ENABLE_ASAN)
+    target_compile_options(rocm_kpack PRIVATE
+        -fsanitize=address
+        -fno-omit-frame-pointer
+    )
+    target_link_options(rocm_kpack PRIVATE
+        -fsanitize=address
+    )
+endif()
+
 # Define export macros based on build type
 get_target_property(KPACK_TYPE rocm_kpack TYPE)
 if(KPACK_TYPE STREQUAL "SHARED_LIBRARY")

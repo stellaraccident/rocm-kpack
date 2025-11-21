@@ -16,16 +16,14 @@ TEST(TestUtilsTest, TestAssetsAccess) {
     EXPECT_TRUE(std::filesystem::is_directory(assets_dir));
   });
 
-  // Verify we can get paths to bundled binaries
+  // Verify we can get paths to generated kpack files
   EXPECT_NO_THROW({
-    auto test_exe = test_utils::get_test_asset(
-        "bundled_binaries/linux/cov5/test_kernel_single.exe");
-    EXPECT_TRUE(std::filesystem::is_regular_file(test_exe));
+    auto noop_kpack = test_utils::get_test_asset("test_noop.kpack");
+    EXPECT_TRUE(std::filesystem::is_regular_file(noop_kpack));
   });
 
-  // Verify we can get paths to code objects
   EXPECT_NO_THROW({
-    auto co_file = test_utils::get_test_asset("ccob/ccob_gfx942_sample1.co");
-    EXPECT_TRUE(std::filesystem::is_regular_file(co_file));
+    auto zstd_kpack = test_utils::get_test_asset("test_zstd.kpack");
+    EXPECT_TRUE(std::filesystem::is_regular_file(zstd_kpack));
   });
 }

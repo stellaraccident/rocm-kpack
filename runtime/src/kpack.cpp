@@ -1,80 +1,97 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocm_kpack/kpack.h"
+#include "kpack_internal.h"
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+extern "C" {
 
-//
-// API Implementation (stubs)
-//
+// Archive opening/closing implemented in archive.cpp
 
-kpack_error_t kpack_open(const char* path, kpack_archive_t* archive) {
-  if (!path || !archive) {
+kpack_error_t kpack_get_architecture_count(kpack_archive_t archive,
+                                           size_t* count) {
+  if (!archive || !count) {
     return KPACK_ERROR_INVALID_ARGUMENT;
   }
 
-  // TODO: Implement archive opening
-  return KPACK_ERROR_NOT_IMPLEMENTED;
+  *count = archive->gfx_arches.size();
+  return KPACK_SUCCESS;
 }
 
-void kpack_close(kpack_archive_t archive) {
-  if (!archive) {
-    return;
-  }
-
-  // TODO: Implement cleanup
-}
-
-kpack_error_t kpack_get_architectures(kpack_archive_t archive, char*** arches,
-                                      size_t* count) {
-  if (!archive || !arches || !count) {
+kpack_error_t kpack_get_architecture(kpack_archive_t archive, size_t index,
+                                     const char** arch) {
+  if (!archive || !arch) {
     return KPACK_ERROR_INVALID_ARGUMENT;
   }
 
-  // TODO: Implement architecture querying
-  return KPACK_ERROR_NOT_IMPLEMENTED;
-}
-
-kpack_error_t kpack_get_binaries(kpack_archive_t archive, char*** binaries,
-                                 size_t* count) {
-  if (!archive || !binaries || !count) {
+  if (index >= archive->gfx_arches.size()) {
     return KPACK_ERROR_INVALID_ARGUMENT;
   }
 
-  // TODO: Implement binary querying
-  return KPACK_ERROR_NOT_IMPLEMENTED;
+  *arch = archive->gfx_arches[index].c_str();
+  return KPACK_SUCCESS;
 }
 
-void kpack_free_string_array(char** array, size_t count) {
-  if (!array) {
-    return;
+kpack_error_t kpack_get_binary_count(kpack_archive_t archive, size_t* count) {
+  if (!archive || !count) {
+    return KPACK_ERROR_INVALID_ARGUMENT;
   }
 
-  for (size_t i = 0; i < count; ++i) {
-    free(array[i]);
+  *count = archive->binary_names.size();
+  return KPACK_SUCCESS;
+}
+
+kpack_error_t kpack_get_binary(kpack_archive_t archive, size_t index,
+                               const char** binary) {
+  if (!archive || !binary) {
+    return KPACK_ERROR_INVALID_ARGUMENT;
   }
-  free(array);
+
+  if (index >= archive->binary_names.size()) {
+    return KPACK_ERROR_INVALID_ARGUMENT;
+  }
+
+  *binary = archive->binary_names[index].c_str();
+  return KPACK_SUCCESS;
 }
 
 kpack_error_t kpack_get_kernel(kpack_archive_t archive, const char* binary_name,
-                               const char* arch, void** kernel_data,
+                               const char* arch, const void** kernel_data,
                                size_t* kernel_size) {
   if (!archive || !binary_name || !arch || !kernel_data || !kernel_size) {
     return KPACK_ERROR_INVALID_ARGUMENT;
   }
 
-  // TODO: Implement kernel loading
-  return KPACK_ERROR_NOT_IMPLEMENTED;
-}
-
-void kpack_free_kernel(kpack_archive_t archive, void* kernel_data) {
-  if (!kernel_data) {
-    return;
+  // Lookup kernel in TOC
+  auto binary_it = archive->toc.find(binary_name);
+  if (binary_it == archive->toc.end()) {
+    return KPACK_ERROR_KERNEL_NOT_FOUND;
   }
 
-  // TODO: Implement kernel freeing
-  free(kernel_data);
+  auto arch_it = binary_it->second.find(arch);
+  if (arch_it == binary_it->second.end()) {
+    return KPACK_ERROR_KERNEL_NOT_FOUND;
+  }
+
+  const kpack::KernelMetadata& km = arch_it->second;
+
+  // Decompress based on scheme
+  kpack_error_t err;
+  if (archive->compression_scheme == KPACK_COMPRESSION_NOOP) {
+    err = kpack::decompress_noop(archive, km.ordinal, km.original_size);
+  } else if (archive->compression_scheme == KPACK_COMPRESSION_ZSTD_PER_KERNEL) {
+    err = kpack::decompress_zstd(archive, km.ordinal, km.original_size);
+  } else {
+    return KPACK_ERROR_NOT_IMPLEMENTED;
+  }
+
+  if (err != KPACK_SUCCESS) {
+    return err;
+  }
+
+  // Return pointer to kernel cache
+  *kernel_data = archive->kernel_cache.data();
+  *kernel_size = archive->kernel_cache.size();
+  return KPACK_SUCCESS;
 }
+
+}  // extern "C"
