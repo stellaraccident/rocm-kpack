@@ -7,18 +7,20 @@ This document describes the integration of rocm-kpack into TheRock's build pipel
 ## Problem Statement
 
 TheRock builds produce artifact directories containing mixed host and device code. These need to be:
+
 1. Split into generic (host-only) and architecture-specific (device code) components
-2. Recombined according to packaging topology for distribution
-3. Organized so runtime can efficiently locate device code
+1. Recombined according to packaging topology for distribution
+1. Organized so runtime can efficiently locate device code
 
 ## Architecture
 
 ### Key Design Decision: Manifest-Based Indirection
 
 Instead of embedding full kpack search paths in host binaries, we use a two-level indirection:
+
 1. Host binaries contain a relative path to a manifest file
-2. The manifest lists available kpack files and their locations
-3. The reduce phase updates the manifest without modifying host binaries
+1. The manifest lists available kpack files and their locations
+1. The reduce phase updates the manifest without modifying host binaries
 
 This provides flexibility in final assembly while keeping host code architecture-agnostic.
 
@@ -32,7 +34,8 @@ The map phase handles two distinct types of device code:
 
 1. **Fat Binaries**: Executables and libraries with embedded `.hip_fatbin` sections containing device code for multiple architectures. These need kpack extraction and transformation.
 
-2. **Kernel Databases**: Pre-compiled kernel collections used by libraries like rocBLAS and hipBLASLt, stored as separate files:
+1. **Kernel Databases**: Pre-compiled kernel collections used by libraries like rocBLAS and hipBLASLt, stored as separate files:
+
    - `.hsaco` files: Compiled GPU kernel archives (160 KB - 3.7 MB each)
    - `.co` files: Individual kernel objects (40 KB - 590 KB each)
    - `.dat` files: MessagePack metadata indexes for lazy loading
@@ -40,13 +43,15 @@ The map phase handles two distinct types of device code:
    These files are already architecture-specific (e.g., `TensileLibrary_lazy_gfx1100.co`) and just need to be moved to the appropriate architecture artifact while preserving directory structure.
 
 ### Input
+
 - Artifact directory from build (e.g., `/develop/therock-build/artifacts/rocblas_lib_gfx110X/`)
 - Contains `artifact_manifest.txt` listing prefix directories
 - Each prefix contains mixed host and device code
 
 ### Process
+
 1. Read `artifact_manifest.txt` to identify prefix directories
-2. For each prefix directory:
+1. For each prefix directory:
    - **For fat binaries** (e.g., in `bin/`, `lib/`):
      - Extract device code from `.hip_fatbin` sections
      - Auto-detect ISAs present in the binary
@@ -56,10 +61,11 @@ The map phase handles two distinct types of device code:
      - Identify architecture-specific kernel files (.hsaco, .co, .dat)
      - Move to corresponding architecture artifact based on filename suffix
      - Preserve directory structure for database compatibility
-3. Create kpack artifact directories following TheRock conventions
-4. Generate kpack manifest (`.kpm` file) for this shard
+1. Create kpack artifact directories following TheRock conventions
+1. Generate kpack manifest (`.kpm` file) for this shard
 
 ### Output Structure
+
 ```
 map-output/
 ├── rocblas_lib_generic/
@@ -101,7 +107,9 @@ map-output/
 Note: Kernel database files (.hsaco, .co, .dat) are moved to architecture-specific artifacts while preserving their directory structure. Fat binaries have their device code extracted into .kpack files.
 
 ### Manifest Format (.kpm)
+
 Using MessagePack format for efficient runtime parsing:
+
 ```python
 # Conceptual structure (actual format is binary MessagePack)
 {
@@ -111,14 +119,14 @@ Using MessagePack format for efficient runtime parsing:
         {
             "architecture": "gfx1100",
             "filename": "miopen_lib_gfx1100.kpack",  # Always in same .kpack/ directory
-            "checksum": b"..."  # SHA256 as bytes
+            "checksum": b"...",  # SHA256 as bytes
         },
         {
             "architecture": "gfx1101",
             "filename": "miopen_lib_gfx1101.kpack",
-            "checksum": b"..."
-        }
-    ]
+            "checksum": b"...",
+        },
+    ],
 }
 ```
 
@@ -127,6 +135,7 @@ Using MessagePack format for efficient runtime parsing:
 The reduce phase combines artifacts from all map phases according to packaging topology.
 
 ### Input
+
 - Artifact directories from all map phase outputs
 - Configuration file defining packaging topology
 
@@ -169,12 +178,14 @@ validation:
 ```
 
 ### Process
+
 1. Download and flatten generic artifacts from primary source
-2. Download and flatten kpack artifact directories according to architecture groups
-3. Update/merge kpack manifests (`.kpm` files) to reflect complete distribution
-4. Organize into package-ready directory structure
+1. Download and flatten kpack artifact directories according to architecture groups
+1. Update/merge kpack manifests (`.kpm` files) to reflect complete distribution
+1. Organize into package-ready directory structure
 
 ### Output Structure
+
 ```
 package-staging/
 ├── gfx110X/
@@ -203,11 +214,13 @@ Note: Each build shard remains independently usable - its `.kpm` file references
 ### New Tools
 
 1. **`split_artifacts.py`** - Map phase tool
+
    - Input: Artifact directory
    - Output: Split generic + per-ISA kpacks
    - Deterministic, no configuration needed
 
-2. **`recombine_artifacts.py`** - Reduce phase tool
+1. **`recombine_artifacts.py`** - Reduce phase tool
+
    - Input: Multiple artifact directories + config
    - Output: Package-ready directory structure
    - Configuration-driven grouping
@@ -215,11 +228,13 @@ Note: Each build shard remains independently usable - its `.kpm` file references
 ### Modified Components
 
 1. **`ElfOffloadKpacker`** - Add manifest reference injection
+
    - Instead of `.rocm_kpack_ref` with direct kpack paths
    - Inject `.rocm_kpack_manifest` with path to `.kpm` file
    - Path format: `.kpack/{name}_{component}.kpm`
 
-2. **Runtime (future)** - Manifest-aware kpack loading
+1. **Runtime (future)** - Manifest-aware kpack loading
+
    - Read manifest path from binary
    - Parse MessagePack manifest
    - Load kpack files from same `.kpack/` directory
@@ -228,15 +243,18 @@ Note: Each build shard remains independently usable - its `.kpm` file references
 ## Integration with TheRock
 
 ### Build Flow
+
 1. Standard TheRock builds produce artifacts (unchanged)
-2. Map phase runs per build, splits artifacts
-3. CI uploads split artifacts to S3
-4. Package jobs download all artifacts
-5. Reduce phase combines according to package type
-6. Standard packaging tools create DEB/RPM/wheels
+1. Map phase runs per build, splits artifacts
+1. CI uploads split artifacts to S3
+1. Package jobs download all artifacts
+1. Reduce phase combines according to package type
+1. Standard packaging tools create DEB/RPM/wheels
 
 ### Artifact Naming Convention
+
 Following TheRock's pattern:
+
 - Generic: `{name}_{component}_generic/` (host-only binaries with manifest references)
 - Device: `{name}_{component}_gfx{arch}/` (architecture-specific kpack files)
 - Manifest: `{name}_{component}.kpm` (always in `.kpack/` directory)
@@ -244,16 +262,17 @@ Following TheRock's pattern:
 ## Advantages of This Approach
 
 1. **Host Code Stability**: Host binaries don't need modification during reduce phase
-2. **Flexible Packaging**: Can reorganize kpacks without touching binaries
-3. **Deterministic Map**: No configuration needed for splitting
-4. **Configurable Reduce**: Packaging topology defined in version-controlled config
-5. **Incremental Updates**: Can update manifest without full rebuild
+1. **Flexible Packaging**: Can reorganize kpacks without touching binaries
+1. **Deterministic Map**: No configuration needed for splitting
+1. **Configurable Reduce**: Packaging topology defined in version-controlled config
+1. **Incremental Updates**: Can update manifest without full rebuild
 
 ## Manifest Path Resolution
 
 ### Solution: Pre-computed Relative Paths
 
 When the splitting tool processes a binary, it knows:
+
 - The prefix root (e.g., `/opt/rocm`)
 - The binary's location within the prefix (e.g., `lib/libhip.so`)
 - The manifest location (`.kpack/{name}_{component}.kpm`)
@@ -273,10 +292,11 @@ Embedded path: ../../../.kpack/hip_lib.kpm
 ### Embedded Metadata Format
 
 The `.rocm_kpack_manifest` section contains MessagePack data:
+
 ```python
 {
     "component": "hip_lib",
-    "manifest_path": "../.kpack/hip_lib.kpm"  # Pre-computed relative path
+    "manifest_path": "../.kpack/hip_lib.kpm",  # Pre-computed relative path
 }
 ```
 
@@ -306,24 +326,28 @@ hashmap_put(loaded_manifests, manifest_path, manifest);
 ## Runtime Lookup Mechanism
 
 ### Overview
+
 Once a binary locates its `.kpm` manifest file, the runtime needs to load the appropriate kpack files based on the detected GPU architecture.
 
 ### Detailed Flow
 
 1. **GPU Detection**:
+
    ```c
    // Detect current GPU architecture
    gpu_arch = detect_gpu_arch();  // Returns e.g., "gfx1100"
    ```
 
-2. **Manifest Loading**:
+1. **Manifest Loading**:
+
    ```c
    // Load and parse MessagePack manifest
    manifest = load_kpm(manifest_path);
    // manifest contains list of available architectures and kpack filenames
    ```
 
-3. **Architecture Selection**:
+1. **Architecture Selection**:
+
    ```c
    // Direct match
    kpack_entry = find_in_manifest(manifest, gpu_arch);
@@ -335,7 +359,8 @@ Once a binary locates its `.kpm` manifest file, the runtime needs to load the ap
    }
    ```
 
-4. **Kpack Loading**:
+1. **Kpack Loading**:
+
    ```c
    // Construct full path (kpack files are in same .kpack/ directory as manifest)
    kpack_path = dirname(manifest_path) + "/" + kpack_entry.filename;
@@ -364,21 +389,23 @@ Note: Fallback rules are GPU-family specific and encoded in the runtime, not the
 ### Lazy Loading Strategy
 
 1. **On-Demand**: Kernels are loaded only when first requested, not at binary load time
-2. **Caching**: Loaded kernels are cached in memory for reuse
-3. **Memory Mapping**: Large kpack files can be mmap'd rather than fully loaded
-4. **Decompression**: Happens per-kernel, not per-archive, to minimize memory usage
+1. **Caching**: Loaded kernels are cached in memory for reuse
+1. **Memory Mapping**: Large kpack files can be mmap'd rather than fully loaded
+1. **Decompression**: Happens per-kernel, not per-archive, to minimize memory usage
 
 ### Integration Points
 
 The runtime integration happens at these points:
 
 1. **HIP Runtime (CLR or comgr - TBD)**:
+
    - `__hipRegisterFatBinary()`: Detects HIPK magic, triggers manifest lookup
    - `digestFatBinary()`: Lazy loads kernels from kpack as needed
 
    Note: Whether to integrate into CLR or comgr is to be decided later. The examples here assume CLR but this decision is not critical to the overall design.
 
-2. **Kernel Libraries**:
+1. **Kernel Libraries**:
+
    - rocBLAS: No change needed - kernel database files are moved as-is
    - hipBLASLt: No change needed - kernel database files are moved as-is
    - Future: These could migrate to kpack format for consistency
@@ -409,11 +436,13 @@ Future improvements could include CPU fallback or degraded mode, but initially w
 ## Open Questions
 
 1. **Validation Strategy**: What checks should reduce phase perform?
+
    - Required: No duplicate device code per architecture
    - Optional: Verify generic artifacts match across builds
    - Optional: Check kernel compatibility versions
 
-2. **Error Recovery**: What happens if manifest or kpack files are missing?
+1. **Error Recovery**: What happens if manifest or kpack files are missing?
+
    - Option A: Fall back to CPU implementation if available
    - Option B: Hard error - fail fast
    - Option C: Warning + degraded mode
@@ -427,6 +456,7 @@ Python wheels containing ROCm components need similar host/device splitting as a
 ### Input Structure
 
 Unlike artifacts which come from different architecture builds, wheels present as:
+
 - Multiple fat architecture-specific wheels (e.g., `torch_rocm-2.0-gfx110X-linux_x86_64.whl`)
 - Each wheel may contain device code for one or more gfx architectures
 - Embedded kernel databases (e.g., `aotriton/` directories with per-arch kernels)
@@ -436,6 +466,7 @@ Unlike artifacts which come from different architecture builds, wheels present a
 For each input wheel:
 
 1. **Extract wheel contents**:
+
    ```python
    def split_wheel(input_wheel, output_dir, package_name):
        # Extract to temp directory
@@ -443,14 +474,16 @@ For each input wheel:
            z.extractall(temp_dir)
    ```
 
-2. **Process similar to artifacts**:
+1. **Process similar to artifacts**:
+
    - Identify fat binaries and extract device code
    - Locate kernel databases (e.g., `site-packages/aotriton/kernels/gfx1100/`)
    - Generate `.kpm` manifest files (in `_kpack/` directory)
 
-3. **Create two output wheels**:
+1. **Create two output wheels**:
 
    **Host wheel** (device code removed):
+
    ```
    torch_rocm-2.0-linux_x86_64.whl
    ├── torch/
@@ -462,6 +495,7 @@ For each input wheel:
    ```
 
    **Device wheel** (kpack module):
+
    ```
    torch_rocm_kpack_gfx1100-2.0-linux_x86_64.whl
    ├── _torch_rocm_kpack/  # No __init__.py - allows multiple device wheels to overlay
@@ -474,11 +508,13 @@ For each input wheel:
    ```
 
    Note:
+
    - No `__init__.py` in `_torch_rocm_kpack/` allows multiple device wheels to overlay
    - Kernel databases remain at original paths relative to site-packages for proper overlay
    - Only fat binary device code (kpack files) goes in `_*_kpack` directory
 
-4. **Wheel metadata adjustments**:
+1. **Wheel metadata adjustments**:
+
    ```python
    def update_wheel_metadata(wheel_dir, suffix=None):
        # Update METADATA and RECORD files
@@ -487,9 +523,10 @@ For each input wheel:
        # Inject WheelNext metadata for auto-detection and dependency resolution
    ```
 
-5. **WheelNext Integration**:
+1. **WheelNext Integration**:
 
    WheelNext metadata will be injected into both host and device wheels to enable:
+
    - Automatic GPU detection and device wheel installation
    - Dynamic dependency resolution based on detected hardware
    - Coordinated version management between host and device wheels
@@ -531,13 +568,14 @@ def recombine_wheels(config, host_wheel, device_wheels, output_dir):
 ### Key Differences from Artifact Flow
 
 1. **Packaging constraints**: Must maintain valid wheel structure and metadata
-2. **Module organization**: Device code goes in `_{package}_kpack/` Python module
-3. **Dependency management**: Device wheels may declare dependency on host wheel
-4. **Naming conventions**: Wheel names must follow PEP standards with architecture suffixes
+1. **Module organization**: Device code goes in `_{package}_kpack/` Python module
+1. **Dependency management**: Device wheels may declare dependency on host wheel
+1. **Naming conventions**: Wheel names must follow PEP standards with architecture suffixes
 
 ### Tool Integration
 
 The wheel splitter will reuse most components from artifact splitting:
+
 - Same `BundledBinary` class for kernel extraction
 - Same kpack creation logic
 - Same manifest generation
@@ -562,9 +600,9 @@ python -m rocm_kpack.tools.recombine_wheels \
 ### Open Questions for Wheel Splitting
 
 1. **Wheel naming**: Exact suffix format for device wheels (e.g., `_kpack_gfx1100` vs `_gfx1100`)
-2. **Dependency declaration**: Should device wheels depend on exact host wheel version?
-3. **Module structure**: Should device code be importable or just data files?
-4. **Metadata preservation**: How much of original wheel metadata to preserve?
+1. **Dependency declaration**: Should device wheels depend on exact host wheel version?
+1. **Module structure**: Should device code be importable or just data files?
+1. **Metadata preservation**: How much of original wheel metadata to preserve?
 
 Note: The exact ergonomics of wheel naming and dependencies will need refinement during implementation, but the core split/recombine pattern remains the same as artifacts.
 
@@ -573,9 +611,11 @@ Note: The exact ergonomics of wheel naming and dependencies will need refinement
 ### Tool 1: split_artifacts.py
 
 #### Purpose
+
 Map phase tool to split artifact directories into generic (host-only) and architecture-specific components.
 
 #### Command Line Interface
+
 ```bash
 python -m rocm_kpack.tools.split_artifacts \
     --input-dir /path/to/artifact_dir \
@@ -587,6 +627,7 @@ python -m rocm_kpack.tools.split_artifacts \
 #### Implementation Steps
 
 1. **Artifact Processing**:
+
    ```python
    class ArtifactSplitter:
        def split(self, input_dir, output_dir, component_name):
@@ -598,7 +639,8 @@ python -m rocm_kpack.tools.split_artifacts \
                self.process_prefix(prefix, component_name)
    ```
 
-2. **Binary Classification**:
+1. **Binary Classification**:
+
    ```python
    def classify_files(self, prefix_dir):
        fat_binaries = []
@@ -616,21 +658,23 @@ python -m rocm_kpack.tools.split_artifacts \
        return fat_binaries, kernel_databases
    ```
 
-3. **Relative Path Computation**:
+1. **Relative Path Computation**:
+
    ```python
    def compute_relative_path(binary_path, component_name):
        """Compute relative path from binary to its .kpm manifest."""
        # binary_path is relative to prefix root
        # e.g., "lib/libhip.so" or "lib/rocm/bin/hipcc"
-       depth = binary_path.count('/')
+       depth = binary_path.count("/")
 
        # Build path: go up 'depth' levels, then into .kpack/
-       up_path = '/'.join(['..'] * depth)
+       up_path = "/".join([".."] * depth)
        manifest_name = f"{component_name}.kpm"
        return f"{up_path}/.kpack/{manifest_name}"
    ```
 
-4. **Fat Binary Processing**:
+1. **Fat Binary Processing**:
+
    ```python
    def process_fat_binaries(self, binaries, component_name):
        kernels_by_arch = {}
@@ -653,7 +697,8 @@ python -m rocm_kpack.tools.split_artifacts \
            self.create_kpack(arch, kernels, component_name)
    ```
 
-5. **Kernel Database Handling**:
+1. **Kernel Database Handling**:
+
    ```python
    def move_kernel_databases(self, kernel_files_by_arch, output_dir):
        for arch, files in kernel_files_by_arch.items():
@@ -672,32 +717,33 @@ python -m rocm_kpack.tools.split_artifacts \
            self.write_artifact_manifest(arch_dir)
    ```
 
-6. **Manifest Generation**:
+1. **Manifest Generation**:
+
    ```python
    def generate_kpm(self, component_name, available_arches):
-       manifest = {
-           "version": 1,
-           "component": component_name,
-           "kpack_files": []
-       }
+       manifest = {"version": 1, "component": component_name, "kpack_files": []}
 
        for arch in available_arches:
-           manifest["kpack_files"].append({
-               "architecture": arch,
-               "filename": f"{component_name}_{arch}.kpack",
-               "checksum": compute_sha256(...)
-           })
+           manifest["kpack_files"].append(
+               {
+                   "architecture": arch,
+                   "filename": f"{component_name}_{arch}.kpack",
+                   "checksum": compute_sha256(...),
+               }
+           )
 
        # Write as MessagePack
        return msgpack.packb(manifest)
    ```
 
 #### Key Classes to Reuse/Extend from rocm-kpack
+
 - `BundledBinary` - for kernel extraction
 - `PackedKernelArchive` - for kpack creation
 - `ElfOffloadKpacker` - for binary modification
 
 #### Simple Reimplementations Needed
+
 - Artifact manifest reading (just parse `artifact_manifest.txt`)
 - Directory traversal (basic os.walk or pathlib)
 - Artifact flattening (copy with prefix merging)
@@ -705,9 +751,11 @@ python -m rocm_kpack.tools.split_artifacts \
 ### Tool 2: recombine_artifacts.py
 
 #### Purpose
+
 Reduce phase tool to recombine split artifacts according to packaging topology.
 
 #### Command Line Interface
+
 ```bash
 python -m rocm_kpack.tools.recombine_artifacts \
     --config packaging-topology.yaml \
@@ -720,6 +768,7 @@ python -m rocm_kpack.tools.recombine_artifacts \
 #### Implementation Steps
 
 1. **Configuration Loading**:
+
    ```python
    class PackagingConfig:
        def __init__(self, config_path):
@@ -727,13 +776,14 @@ python -m rocm_kpack.tools.recombine_artifacts \
            self.validate_schema()
 
        def get_architecture_groups(self):
-           return self.config['architecture_groups']
+           return self.config["architecture_groups"]
 
        def get_primary_source(self):
-           return self.config.get('primary_generic_source')
+           return self.config.get("primary_generic_source")
    ```
 
-2. **Artifact Collection**:
+1. **Artifact Collection**:
+
    ```python
    class ArtifactCollector:
        def collect(self, input_mappings):
@@ -742,28 +792,29 @@ python -m rocm_kpack.tools.recombine_artifacts \
            for build_name, path in input_mappings.items():
                # Find all artifact directories
                artifacts[build_name] = {
-                   'generic': find_generic_artifacts(path),
-                   'arch_specific': find_arch_artifacts(path)
+                   "generic": find_generic_artifacts(path),
+                   "arch_specific": find_arch_artifacts(path),
                }
 
            return artifacts
    ```
 
-3. **Flattening and Merging**:
+1. **Flattening and Merging**:
+
    ```python
    def create_package_layout(self, arch_group, artifacts, config):
        output = self.output_dir / arch_group
 
        # 1. Copy generic artifacts from primary source
        primary = config.get_primary_source()
-       for generic_artifact in artifacts[primary]['generic']:
+       for generic_artifact in artifacts[primary]["generic"]:
            flatten_artifact(generic_artifact, output)
 
        # 2. Collect architecture-specific artifacts
        for arch in config.get_architectures(arch_group):
            for build in artifacts:
                arch_artifact = find_artifact_for_arch(
-                   artifacts[build]['arch_specific'], arch
+                   artifacts[build]["arch_specific"], arch
                )
                if arch_artifact:
                    flatten_artifact(arch_artifact, output)
@@ -772,36 +823,40 @@ python -m rocm_kpack.tools.recombine_artifacts \
        self.update_manifests(output, arch_group)
    ```
 
-4. **Manifest Merging**:
+1. **Manifest Merging**:
+
    ```python
    def update_manifests(self, package_dir, arch_group):
-       kpack_dir = package_dir / '.kpack'
+       kpack_dir = package_dir / ".kpack"
 
        # Find all .kpm files
-       kpm_files = kpack_dir.glob('*.kpm')
+       kpm_files = kpack_dir.glob("*.kpm")
 
        for kpm_path in kpm_files:
            # Load existing manifest
            manifest = msgpack.unpackb(kpm_path.read_bytes())
 
            # Update with all available kpack files in directory
-           available_kpacks = kpack_dir.glob('*.kpack')
-           manifest['kpack_files'] = []
+           available_kpacks = kpack_dir.glob("*.kpack")
+           manifest["kpack_files"] = []
 
            for kpack_path in available_kpacks:
                # Extract architecture from filename
                arch = extract_arch_from_kpack_name(kpack_path.name)
-               manifest['kpack_files'].append({
-                   'architecture': arch,
-                   'filename': kpack_path.name,
-                   'checksum': compute_sha256(kpack_path)
-               })
+               manifest["kpack_files"].append(
+                   {
+                       "architecture": arch,
+                       "filename": kpack_path.name,
+                       "checksum": compute_sha256(kpack_path),
+                   }
+               )
 
            # Write updated manifest
            kpm_path.write_bytes(msgpack.packb(manifest))
    ```
 
-5. **Validation**:
+1. **Validation**:
+
    ```python
    def validate_no_duplicates(self, package_dir):
        seen_kernels = {}
@@ -820,11 +875,13 @@ python -m rocm_kpack.tools.recombine_artifacts \
    ```
 
 #### Simple Artifact Operations
+
 ```python
 def read_artifact_manifest(artifact_dir):
     """Read artifact_manifest.txt and return list of prefixes."""
-    manifest_path = artifact_dir / 'artifact_manifest.txt'
+    manifest_path = artifact_dir / "artifact_manifest.txt"
     return manifest_path.read_text().strip().splitlines()
+
 
 def flatten_artifact(artifact_dir, output_dir):
     """Flatten artifact by copying all prefixes to output."""
@@ -838,17 +895,20 @@ def flatten_artifact(artifact_dir, output_dir):
 ### Testing Strategy
 
 1. **Unit Tests**:
+
    - Test ISA detection from kernel files
    - Test manifest generation and parsing
    - Test kernel database file classification
 
-2. **Integration Tests**:
+1. **Integration Tests**:
+
    - Create sample artifact directories
    - Run split → recombine pipeline
    - Verify output structure matches expectation
    - Verify runtime can load kernels
 
-3. **End-to-End Tests**:
+1. **End-to-End Tests**:
+
    - Use real ROCm build artifacts
    - Split actual gfx110X build
    - Recombine with configuration
@@ -857,7 +917,7 @@ def flatten_artifact(artifact_dir, output_dir):
 ## Next Steps
 
 1. Prototype split_artifacts.py with minimal functionality
-2. Test with single artifact directory
-3. Implement recombine_artifacts.py
-4. Create integration test suite
-5. Test with full TheRock build
+1. Test with single artifact directory
+1. Implement recombine_artifacts.py
+1. Create integration test suite
+1. Test with full TheRock build

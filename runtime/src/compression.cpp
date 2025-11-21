@@ -1,13 +1,14 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocm_kpack/kpack.h"
-
 #include <zstd.h>
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+
+#include "rocm_kpack/kpack.h"
 
 // Decompression functions will be implemented here
 

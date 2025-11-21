@@ -20,6 +20,7 @@ class KernelInput(NamedTuple):
         hsaco_data: Raw HSACO binary data
         metadata: Optional metadata dict to store in TOC
     """
+
     relative_path: str
     gfx_arch: str
     hsaco_data: bytes
@@ -70,7 +71,9 @@ def parallel_prepare_kernels(
     # Sequential path when no executor provided
     if executor is None:
         return [
-            archive.prepare_kernel(k.relative_path, k.gfx_arch, k.hsaco_data, k.metadata)
+            archive.prepare_kernel(
+                k.relative_path, k.gfx_arch, k.hsaco_data, k.metadata
+            )
             for k in kernels
         ]
 
@@ -79,7 +82,11 @@ def parallel_prepare_kernels(
     future_to_index = {}
     for i, k in enumerate(kernels):
         future = executor.submit(
-            archive.prepare_kernel, k.relative_path, k.gfx_arch, k.hsaco_data, k.metadata
+            archive.prepare_kernel,
+            k.relative_path,
+            k.gfx_arch,
+            k.hsaco_data,
+            k.metadata,
         )
         future_to_index[future] = i
 

@@ -8,7 +8,7 @@ ROCm applications and libraries traditionally ship device code in two problemati
 
 1. **Fat Binaries**: Executables and shared libraries contain embedded `.hip_fatbin` sections with device code for all supported GPU architectures. A single binary may contain code for gfx900, gfx906, gfx908, gfx90a, gfx940, gfx941, gfx942, gfx1030, gfx1100, gfx1101, gfx1102, and more. Since device code comprises a significant portion of these binaries, supporting many architectures leads to substantial bloat.
 
-2. **Ad-hoc Database Directories**: Libraries like rocBLAS, hipBLASLt, rocFFT, and AOTriton maintain kernel databases in various formats (SQLite, filesystem hierarchies, custom formats) with inconsistent organization and no standard loading interface.
+1. **Ad-hoc Database Directories**: Libraries like rocBLAS, hipBLASLt, rocFFT, and AOTriton maintain kernel databases in various formats (SQLite, filesystem hierarchies, custom formats) with inconsistent organization and no standard loading interface.
 
 These approaches create several problems:
 
@@ -23,7 +23,7 @@ These approaches create several problems:
 **Kpack** provides a structured format for separating device code from host binaries by architecture, combined with a unified runtime loading interface. The system has two primary components:
 
 1. **Offload Kpacker**: Transforms fat binaries and kernel databases into architecture-separated kpack archives
-2. **Runtime Integration**: Lazy-loading infrastructure in CLR and kernel libraries to load device code on-demand
+1. **Runtime Integration**: Lazy-loading infrastructure in CLR and kernel libraries to load device code on-demand
 
 The transformation process extracts device code from binaries, organizes it into compressed per-architecture archives with structured table-of-contents (TOC), and converts the host binaries to reference external device code through a standard marker format.
 
@@ -46,7 +46,7 @@ This document covers:
 - **Runtime integration**: CLR modifications for loading kpack device code
 - **Build implications**: Integration points for ROCm, PyTorch, and third-party builds
 
----
+______________________________________________________________________
 
 ## 2. KPACK Transformations
 
@@ -89,6 +89,7 @@ objcopy --dump-section .hip_fatbin=fatbin.bin binary
 ```
 
 The extracted section contains a bundled blob in clang-offload-bundler format, which may be:
+
 - Uncompressed bundle (multiple architecture code objects concatenated)
 - Compressed Code Object Bundle (CCOB) - zstd-compressed per-bundle format
 - Direct ELF code object (single architecture)
@@ -100,6 +101,7 @@ clang-offload-bundler --type=o --input=fatbin.bin --list
 ```
 
 Output example:
+
 ```
 hipv4-amdgcn-amd-amdhsa--gfx1100
 hipv4-amdgcn-amd-amdhsa--gfx1101
@@ -147,47 +149,39 @@ A kpack archive is a binary file with three sections:
 ```python
 {
     "format_version": 1,
-    "group_name": "rocm",              # Build group identifier
-    "gfx_arch_family": "gfx1100",      # Primary architecture family
+    "group_name": "rocm",  # Build group identifier
+    "gfx_arch_family": "gfx1100",  # Primary architecture family
     "gfx_arches": ["gfx1100", "gfx1101", "gfx1102"],  # All covered arches
     "compression_scheme": "zstd-per-kernel",
-
     # Compression-specific metadata (zstd-per-kernel)
-    "zstd_offset": 64,                 # Start of blob data
-    "zstd_size": 245628,               # Total blob size
-
+    "zstd_offset": 64,  # Start of blob data
+    "zstd_size": 245628,  # Total blob size
     # Per-binary kernel TOC
     "toc": {
         "bin/hipcc": {
             "gfx1100": {
                 "type": "hsaco",
-                "ordinal": 0,          # Index into compression blob
-                "original_size": 7472  # Decompressed size
+                "ordinal": 0,  # Index into compression blob
+                "original_size": 7472,  # Decompressed size
             },
-            "gfx1101": {
-                "type": "hsaco",
-                "ordinal": 1,
-                "original_size": 7488
-            }
+            "gfx1101": {"type": "hsaco", "ordinal": 1, "original_size": 7488},
         },
         "lib/libamdhip64.so.6": {
-            "gfx1100": {
-                "type": "hsaco",
-                "ordinal": 2,
-                "original_size": 138456
-            }
-        }
-    }
+            "gfx1100": {"type": "hsaco", "ordinal": 2, "original_size": 138456}
+        },
+    },
 }
 ```
 
 **Compression Strategies**
 
 1. **NoOp Compression**: Kernels concatenated without compression (baseline)
+
    - Blob: Direct concatenation of .hsaco files
    - TOC: Each entry stores byte offset and size
 
-2. **Zstd Per-Kernel**: Each kernel compressed independently (default)
+1. **Zstd Per-Kernel**: Each kernel compressed independently (default)
+
    - Blob structure:
      ```
      [num_kernels: uint32]
@@ -231,10 +225,10 @@ After Zero-Paging:
 **Algorithm**:
 
 1. Find the first page boundary ≥ section_start
-2. Find the last page boundary ≤ section_end
-3. Zero bytes between these boundaries
-4. Preserve bytes before first boundary (prefix)
-5. Preserve bytes after last boundary (suffix)
+1. Find the last page boundary ≤ section_end
+1. Zero bytes between these boundaries
+1. Preserve bytes before first boundary (prefix)
+1. Preserve bytes after last boundary (suffix)
 
 **ELF Consequences**:
 
@@ -262,7 +256,7 @@ All relocations, dynamic section entries, and GOT entries pointing into the modi
     "kpack_search_paths": [
         "../.kpack/rocm-gfx1100.kpack",  # Relative to binary
         "../.kpack/rocm-gfx1200.kpack",  # Relative to binary
-    ]
+    ],
 }
 ```
 
@@ -284,11 +278,11 @@ The section has `SHF_ALLOC` cleared initially (not loaded at runtime).
 **Process**:
 
 1. Create a new PT_LOAD segment with appropriate permissions (R)
-2. Set segment's `p_offset` to marker section's file offset
-3. Set segment's `p_filesz` and `p_memsz` to marker section size
-4. Assign a virtual address for the segment (typically after existing segments)
-5. Update section header: set `SHF_ALLOC` flag
-6. Update section header: set `sh_addr` to match segment's virtual address
+1. Set segment's `p_offset` to marker section's file offset
+1. Set segment's `p_filesz` and `p_memsz` to marker section size
+1. Assign a virtual address for the segment (typically after existing segments)
+1. Update section header: set `SHF_ALLOC` flag
+1. Update section header: set `sh_addr` to match segment's virtual address
 
 **Result**: The marker section is now loaded into memory at runtime, accessible via its virtual address.
 
@@ -310,21 +304,23 @@ struct __CudaFatBinaryWrapper {
 **Pointer Update Process**:
 
 1. Locate `__CudaFatBinaryWrapper` instances in `.data` or `.rodata`
+
    - Search for HIPF magic: `0x48495046`
    - Verify version field: `0x00000001`
 
-2. Read the `binary` pointer (offset +8 from magic)
+1. Read the `binary` pointer (offset +8 from magic)
 
-3. Calculate new pointer value:
+1. Calculate new pointer value:
+
    ```
    new_pointer = .rocm_kpack_ref_vaddr + (old_pointer - .hip_fatbin_vaddr)
    ```
 
    This preserves any offset within the section (usually 0).
 
-4. Write new pointer back to wrapper structure
+1. Write new pointer back to wrapper structure
 
-5. Update any relocations referencing this pointer
+1. Update any relocations referencing this pointer
 
 **Relocation Handling**:
 
@@ -349,8 +345,8 @@ This ensures the dynamic linker applies the correct runtime adjustment.
 **Process**:
 
 1. Locate all `__CudaFatBinaryWrapper` structures (found in step 3.4)
-2. Overwrite magic field: `0x48495046` → `0x4B504948`
-3. Leave all other fields unchanged
+1. Overwrite magic field: `0x48495046` → `0x4B504948`
+1. Leave all other fields unchanged
 
 **Runtime Detection**:
 
@@ -391,7 +387,7 @@ output_root/
 - **Relative search paths**: Binaries reference `../.kpack/` allowing relocatable installs
 - **Transparent to unmodified code**: Host API and ABI unchanged
 
----
+______________________________________________________________________
 
 ### 2b. Kernel Library Database Kpack Archives
 
@@ -449,6 +445,7 @@ class DatabaseRecognizer(ABC):
         """Thorough validation and parsing. Returns KernelDatabase if valid."""
         pass
 
+
 class KernelDatabase(ABC):
     """Abstract interface for a recognized kernel database."""
 
@@ -462,11 +459,13 @@ class KernelDatabase(ABC):
         """Yield all kernel artifacts in the database."""
         pass
 
+
 class KernelArtifact:
     """Represents a single kernel artifact."""
-    relative_path: Path        # Path within database
-    gfx_target: str           # Architecture (e.g., 'gfx1100')
-    artifact_type: str        # 'hsaco', 'co', etc.
+
+    relative_path: Path  # Path within database
+    gfx_target: str  # Architecture (e.g., 'gfx1100')
+    artifact_type: str  # 'hsaco', 'co', etc.
     metadata: Dict[str, Any]  # Library-specific metadata
 ```
 
@@ -496,6 +495,7 @@ registry.register(AOTritonRecognizer())
 **Current Format**: SQLite database with tables mapping problem configurations to kernel file paths.
 
 **Database Structure**:
+
 ```sql
 -- Simplified schema
 CREATE TABLE kernels (
@@ -509,13 +509,13 @@ CREATE TABLE kernels (
 **Transformation Approach**:
 
 1. **Scan**: FFTRecognizer detects SQLite files in `lib/rocfft/` or similar
-2. **Extract**: Query database for all `(arch, kernel_path)` pairs
-3. **Load Kernels**: Read each `.co` file from disk
-4. **Pack**: Add to kpack TOC with structured key:
+1. **Extract**: Query database for all `(arch, kernel_path)` pairs
+1. **Load Kernels**: Read each `.co` file from disk
+1. **Pack**: Add to kpack TOC with structured key:
    ```python
    toc_key = f"fft/{arch}/{length}/{precision}/kernel"
    ```
-5. **Update Library**: Modify rocFFT to query kpack instead of SQLite
+1. **Update Library**: Modify rocFFT to query kpack instead of SQLite
    - Lookup: `kpack.get_kernel("fft/gfx1100/1024/single/kernel")`
    - Load returned HSACO into ROCm runtime
 
@@ -532,8 +532,8 @@ FFT-specific metadata (length, precision, batch size) is preserved in the TOC:
             "metadata": {
                 "length": 1024,
                 "precision": "single",
-                "factors": [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
-            }
+                "factors": [2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+            },
         }
     }
 }
@@ -544,6 +544,7 @@ FFT-specific metadata (length, precision, batch size) is preserved in the TOC:
 **Current Format**: Directory tree with hierarchical organization.
 
 **Structure**:
+
 ```
 hipblaslt/
 └── library/
@@ -558,13 +559,13 @@ hipblaslt/
 **Transformation Approach**:
 
 1. **Scan**: HipBLASLtRecognizer detects `TensileLibrary/` directory structure
-2. **Extract**: Walk directory tree, identify architecture from path
-3. **Parse Metadata**: Extract GEMM parameters from kernel names (M, N, K, datatype)
-4. **Pack**: Add to kpack TOC:
+1. **Extract**: Walk directory tree, identify architecture from path
+1. **Parse Metadata**: Extract GEMM parameters from kernel names (M, N, K, datatype)
+1. **Pack**: Add to kpack TOC:
    ```python
    toc_key = f"hipblaslt/{arch}/gemm_kernel_{id}"
    ```
-5. **Update Library**: Modify hipBLASLt kernel selection logic
+1. **Update Library**: Modify hipBLASLt kernel selection logic
    - Match problem to kernel based on M/N/K
    - Load from: `kpack.get_kernel("hipblaslt/gfx1100/gemm_kernel_1")`
 
@@ -578,11 +579,13 @@ The TOC preserves GEMM parameters for kernel selection:
         "type": "co",
         "ordinal": 15,
         "metadata": {
-            "M": 4096, "N": 4096, "K": 4096,
+            "M": 4096,
+            "N": 4096,
+            "K": 4096,
             "datatype": "FP16",
             "transpose_a": false,
-            "transpose_b": false
-        }
+            "transpose_b": false,
+        },
     }
 }
 ```
@@ -592,6 +595,7 @@ The TOC preserves GEMM parameters for kernel selection:
 **Current Format**: Tensile library with logic YAML files and kernel co-objects.
 
 **Structure**:
+
 ```
 rocblas/
 └── library/
@@ -604,19 +608,20 @@ rocblas/
 **Transformation Approach**:
 
 1. **Scan**: RocBLASRecognizer detects `TensileLibrary.yaml` + `gfx*/` structure
-2. **Parse Logic**: Read YAML to understand problem→kernel mapping
-3. **Extract Kernels**: Identify all referenced `.co` files per architecture
-4. **Pack**: Preserve Tensile naming:
+1. **Parse Logic**: Read YAML to understand problem→kernel mapping
+1. **Extract Kernels**: Identify all referenced `.co` files per architecture
+1. **Pack**: Preserve Tensile naming:
    ```python
    toc_key = f"rocblas/{arch}/{tensile_kernel_name}"
    ```
-5. **Update Library**: Modify Tensile library loader
+1. **Update Library**: Modify Tensile library loader
    - Query logic remains same (YAML-based matching)
    - Kernel loading: `kpack.get_kernel(f"rocblas/{arch}/{kernel_name}")`
 
 **Logic File Handling**:
 
 The YAML logic file can be either:
+
 - Packed into kpack TOC as metadata
 - Kept as separate file (smaller, easier to update)
 
@@ -627,6 +632,7 @@ Tradeoff: Packing logic increases kpack size but simplifies deployment.
 **Current Format**: AOT-compiled Triton kernels in directory structure.
 
 **Structure**:
+
 ```
 aotriton/
 └── kernels/
@@ -640,12 +646,12 @@ aotriton/
 **Transformation Approach**:
 
 1. **Scan**: AOTritonRecognizer detects `kernels/gfx*/` pattern
-2. **Extract**: Enumerate `.hsaco` files per architecture
-3. **Pack**: Use kernel operation names:
+1. **Extract**: Enumerate `.hsaco` files per architecture
+1. **Pack**: Use kernel operation names:
    ```python
    toc_key = f"aotriton/{arch}/{operation_name}"
    ```
-4. **Update Library**: Modify AOTriton runtime
+1. **Update Library**: Modify AOTriton runtime
    - Operation dispatch remains same
    - Kernel loading: `kpack.get_kernel(f"aotriton/{arch}/flash_attention_fwd")`
 
@@ -661,8 +667,8 @@ AOTriton kernels require type signatures for runtime dispatch. These are preserv
         "metadata": {
             "operation": "flash_attention_fwd",
             "signature": "(f32[M,N], f32[N,K]) -> f32[M,K]",
-            "tuning_params": {"block_m": 64, "block_n": 64}
-        }
+            "tuning_params": {"block_m": 64, "block_n": 64},
+        },
     }
 }
 ```
@@ -672,12 +678,12 @@ AOTriton kernels require type signatures for runtime dispatch. These are preserv
 All library transformations share these design principles:
 
 1. **Preserve Dispatch Logic**: Library's kernel selection algorithm unchanged
-2. **Structured TOC Keys**: Hierarchical naming enables efficient lookup
-3. **Metadata Retention**: Library-specific parameters stored in TOC
-4. **Lazy Loading**: Load only kernels used by application
-5. **Architecture Filtering**: Libraries query only their target architecture's kernels
+1. **Structured TOC Keys**: Hierarchical naming enables efficient lookup
+1. **Metadata Retention**: Library-specific parameters stored in TOC
+1. **Lazy Loading**: Load only kernels used by application
+1. **Architecture Filtering**: Libraries query only their target architecture's kernels
 
----
+______________________________________________________________________
 
 ## 3. Runtime Integrations
 
@@ -775,23 +781,23 @@ kpack_error_t kpack_get_kernel_metadata(
 The CLR uses librocm_kpack.so during lazy loading:
 
 1. Parse `.rocm_kpack_ref` marker section
-2. Iterate through `kpack_search_paths`
-3. `kpack_open()` first valid kpack file
-4. `kpack_get_kernel()` for detected GPU architecture
-5. Pass kernel bytes to `FatBinaryInfo::AddDevProgram()`
-6. `kpack_close()` when binary unloads
+1. Iterate through `kpack_search_paths`
+1. `kpack_open()` first valid kpack file
+1. `kpack_get_kernel()` for detected GPU architecture
+1. Pass kernel bytes to `FatBinaryInfo::AddDevProgram()`
+1. `kpack_close()` when binary unloads
 
 **Kernel Library Integration**:
 
 Libraries (rocFFT, rocBLAS, hipBLASLt) use librocm_kpack.so for kernel databases:
 
 1. During library initialization, `kpack_open()` library-specific kpack
-2. Query device architecture
-3. `kpack_list_kernels()` to enumerate available kernels
-4. Cache metadata for dispatch logic
-5. On first use: `kpack_get_kernel()` for selected kernel
-6. Load kernel into ROCm runtime
-7. `kpack_close()` at library teardown
+1. Query device architecture
+1. `kpack_list_kernels()` to enumerate available kernels
+1. Cache metadata for dispatch logic
+1. On first use: `kpack_get_kernel()` for selected kernel
+1. Load kernel into ROCm runtime
+1. `kpack_close()` at library teardown
 
 #### Thread Safety
 
@@ -834,7 +840,7 @@ Returns human-readable error message for last failed operation on this archive.
 - CLR: Try next path in `kpack_search_paths` on `KPACK_ERROR_FILE_NOT_FOUND`
 - Libraries: Fall back to original kernel loading mechanism on any error
 
----
+______________________________________________________________________
 
 ### 3b. CLR Pseudo-code
 
@@ -1212,7 +1218,7 @@ hipError_t StatCO::digestFatBinary(const void* data, FatBinaryInfo*& programs) {
 - Optional fallback to embedded device code
 - Thread-safe (librocm_kpack.so guarantees)
 
----
+______________________________________________________________________
 
 ### 3c. Kernel Library Pseudo-code
 
@@ -1329,21 +1335,25 @@ void rocfft_cleanup() {
 Each library uses a structured TOC key format:
 
 **rocFFT**:
+
 ```
 rocfft/{arch}/{length}/{precision}/kernel
 ```
 
 **rocBLAS**:
+
 ```
 rocblas/{arch}/{gemm|axpy|...}/{datatype}/{transA}_{transB}
 ```
 
 **hipBLASLt**:
+
 ```
 hipblaslt/{arch}/gemm_{M}x{N}x{K}_{dtype}
 ```
 
 **AOTriton**:
+
 ```
 aotriton/{arch}/{operation_name}
 ```
@@ -1353,8 +1363,8 @@ aotriton/{arch}/{operation_name}
 Libraries should cache loaded kernels to avoid repeated decompression:
 
 1. **First access**: Load from kpack, decompress, load into GPU, cache handle
-2. **Subsequent access**: Reuse cached GPU handle
-3. **Cache eviction**: Unload least-recently-used kernels if memory pressure
+1. **Subsequent access**: Reuse cached GPU handle
+1. **Cache eviction**: Unload least-recently-used kernels if memory pressure
 
 #### Performance Considerations
 
@@ -1375,7 +1385,7 @@ Libraries should cache loaded kernels to avoid repeated decompression:
 - Lazy loading: Lower memory, slight first-use latency
 - Recommendation: Lazy load for large libraries (rocBLAS), preload for small (rocFFT)
 
----
+______________________________________________________________________
 
 ## 4. Build and Packaging Implications
 
@@ -1390,6 +1400,7 @@ The ROCm build system (TheRock) integrates kpack through a multi-phase pipeline 
 TheRock builds continue to work as they do today by building individual architecture families in separate invocations. This ensures backward compatibility and allows incremental adoption of kpack optimizations.
 
 **Current Workflow**:
+
 ```
 For each gfx family (gfx900, gfx1100, gfx1200, etc.):
   cmake -DTHEROCK_AMDGPU_FAMILIES=gfx110X -DTHEROCK_AMDGPU_DIST_ARCHITECTURES=<<all available>> ...
@@ -1420,6 +1431,7 @@ ninja -C build-generic
 ```
 
 **Outputs**:
+
 - Compiler binaries (`clang`, `lld`, `hipcc`)
 - System libraries (host-only `libamdhip64.so`, `libhsa-runtime64.so`)
 - Build artifacts needed for device code compilation (headers, CMake configs)
@@ -1449,6 +1461,7 @@ ninja -C build-gfx120X
 ```
 
 **Outputs** (per family):
+
 - Fat binaries with `.hip_fatbin` sections (device code for family)
 - Architecture-specific kernel libraries (rocFFT kernels for gfx110X)
 
@@ -1478,6 +1491,7 @@ ninja -C build-gfx120X
 After the build matrix completes, a pre-packaging phase merges generic and architecture-specific artifacts using the kpack tooling.
 
 **Input**:
+
 - Generic artifacts from Phase 1 (host-only binaries, libraries)
 - Architecture-specific artifacts from Phase 2 (fat binaries, kernel databases)
 
@@ -1496,10 +1510,11 @@ python -m rocm_kpack.tools.pack_tree \
 ```
 
 **For each fat binary**:
+
 1. Extract device code using `clang-offload-bundler`
-2. Add device code to `.kpack/{group_name}-{gfx_arch_family}.kpack`
-3. Convert binary to host-only with `.rocm_kpack_ref` marker
-4. Zero-page `.hip_fatbin` section to reclaim disk space
+1. Add device code to `.kpack/{group_name}-{gfx_arch_family}.kpack`
+1. Convert binary to host-only with `.rocm_kpack_ref` marker
+1. Zero-page `.hip_fatbin` section to reclaim disk space
 
 **Output Structure** (per architecture family):
 
@@ -1548,8 +1563,8 @@ Again, this is simplified for illustration. Details will be worked out by the im
 **Installation Workflow**:
 
 1. Install base package: `apt install rocm-blas-8.0.0`
-2. Auto-detect GPU: `amd-smi --showproductname` → "gfx1100"
-3. Install matching device code: `apt install rocm-blas-gfx110X`
+1. Auto-detect GPU: `amd-smi --showproductname` → "gfx1100"
+1. Install matching device code: `apt install rocm-blas-gfx110X`
 
 **Python Wheels**:
 
@@ -1587,14 +1602,17 @@ The number of architectures packed into each `.kpack` file is determined empiric
 **Grouping Principles**:
 
 1. **Architecture Families**: Group related architectures that share instruction sets
+
    - Example: `gfx1100`, `gfx1101`, `gfx1102` → `rocm-gfx110X.kpack`
    - Rationale: Similar ISA, kernels compress well together, users rarely need all three
 
-2. **Compression Analysis**: Measure overhead of grouping vs. separate archives
+1. **Compression Analysis**: Measure overhead of grouping vs. separate archives
+
    - RDNA (gfx12xx): Likely compress together efficiently due to ISA similarity
    - CDNA (gfx9xx): May benefit from separate archives due to ISA divergence and different optimization approaches
 
-3. **Deployment Granularity**: Balance package count vs. download size
+1. **Deployment Granularity**: Balance package count vs. download size
+
    - Too fine-grained: 20+ packages, complex dependency management
    - Too coarse-grained: Users download unnecessary device code
 
@@ -1620,11 +1638,13 @@ steps:
 ```
 
 **Architectures Chosen**:
+
 - Representative of common development targets
 - Fast compile times
 - Sufficient coverage for regressions
 
 **Tests Run**:
+
 - Host code unit tests (on generic artifacts)
 - Device code smoke tests (one kernel launch per arch)
 - Kpack tooling validation (round-trip unbundle→pack→load)
@@ -1649,7 +1669,7 @@ steps:
   - Package generation (DEB, RPM, wheels, tarballs)
 ```
 
----
+______________________________________________________________________
 
 ### 4.2. PyTorch + WheelNext
 
@@ -1660,6 +1680,7 @@ PyTorch releases integrate kpack through a post-processing workflow that splits 
 Today, PyTorch wheels for ROCm contain fat binaries with embedded device code for all supported architectures. A single wheel includes device code for RDNA, CDNA, and all intermediate architectures.
 
 **Current Release**:
+
 ```
 torch-2.5.0+rocm6.2-cp311-cp311-linux_x86_64.whl
   - Size: ~3GB
@@ -1674,6 +1695,7 @@ For PyTorch releases, we continue building fat binaries but may partition archit
 **Build Options**:
 
 **Option 1: Single Fat Build (All Architectures)**
+
 ```bash
 # Build PyTorch with all ROCm architectures
 export PYTORCH_ROCM_ARCH="gfx90a;gfx940;gfx941;gfx942;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
@@ -1684,6 +1706,7 @@ torch-2.5.0+rocm6.2-cp311-cp311-linux_x86_64.whl
 ```
 
 **Option 2: Split RDNA/CDNA (Balanced)**
+
 ```bash
 # Build RDNA variant
 export PYTORCH_ROCM_ARCH="gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
@@ -1723,15 +1746,15 @@ dist/torch_device_gfx90X-2.5.0+rocm6.2-cp311-cp311-linux_x86_64.whl
 **Processing Steps**:
 
 1. **Extract Wheel Contents**: Unzip the input wheel to temporary directory
-2. **Scan for Artifacts**: Identify bundled binaries and kernel databases
+1. **Scan for Artifacts**: Identify bundled binaries and kernel databases
    - Fat binaries: `torch/lib/libtorch_cuda.so`, `torch/lib/libtorch_hip.so`
    - Kernel databases: aotriton, etc
-3. **Run Kpack Tooling**: Use `pack_tree` logic to extract device code per architecture
-4. **Create Base Wheel**:
+1. **Run Kpack Tooling**: Use `pack_tree` logic to extract device code per architecture
+1. **Create Base Wheel**:
    - Convert binaries to host-only with `.rocm_kpack_ref` markers
    - Remove kernel database directories
    - Repackage as base wheel
-5. **Create Device Wheels**: For each architecture family:
+1. **Create Device Wheels**: For each architecture family:
    - Create new wheel with `.kpack/{group_name}-{arch_family}.kpack`
    - Include kernel database files for that architecture (if present)
    - Repackage as architecture-specific wheel
@@ -1789,15 +1812,13 @@ detection-script = "torch._detect_rocm_arch:get_arch_family"
 ```python
 import subprocess
 
+
 def get_arch_family():
     """Detect GPU architecture family and return corresponding extra."""
     try:
         # Query GPU using rocminfo or similar
         result = subprocess.run(
-            ["rocminfo"],
-            capture_output=True,
-            text=True,
-            check=True
+            ["rocminfo"], capture_output=True, text=True, check=True
         )
 
         # Parse output to extract gfx arch (e.g., "gfx1100")
@@ -1825,6 +1846,7 @@ def get_arch_family():
 **PyPI Distribution**:
 
 Upload all wheels to PyPI:
+
 ```
 torch-2.5.0+rocm6.2-cp311-cp311-linux_x86_64.whl              (Base)
 torch-device-gfx110X-2.5.0+rocm6.2-cp311-cp311-linux_x86_64.whl
@@ -1835,11 +1857,12 @@ torch-device-gfx90X-2.5.0+rocm6.2-cp311-cp311-linux_x86_64.whl
 **Custom PyPI Index** (for ROCm-specific wheels):
 
 Host on custom index to avoid polluting main PyPI:
+
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
 ```
 
----
+______________________________________________________________________
 
 ## 5. Future Optimizations
 
@@ -1854,6 +1877,7 @@ This section outlines potential improvements beyond the initial implementation.
 **Approach**:
 
 1. **Compiler Frontend Integration**: Extend clang/hipcc to accept `--emit-kpack` flag
+
    ```bash
    hipcc --offload-arch=gfx1100 --offload-arch=gfx1101 \
          --emit-kpack=output.kpack \
@@ -1861,19 +1885,22 @@ This section outlines potential improvements beyond the initial implementation.
          kernel.hip
    ```
 
-2. **Direct Archive Generation**: During compilation, the compiler:
+1. **Direct Archive Generation**: During compilation, the compiler:
+
    - Generates device code per architecture (existing behavior)
    - Writes device code directly to kpack archive (new)
    - Emits host-only binary with `.rocm_kpack_ref` marker (new)
    - No intermediate fat binary created
 
-3. **Build Integration Benefits**:
+1. **Build Integration Benefits**:
+
    - Faster builds (no post-processing pass)
    - Simpler toolchain (fewer tools in pipeline)
    - Earlier error detection (kpack issues caught at compile time)
    - Reduced disk I/O (no temporary fat binaries)
 
-4. **Incremental Adoption**: Can coexist with post-hoc transformation
+1. **Incremental Adoption**: Can coexist with post-hoc transformation
+
    - Legacy builds continue using offload_kpacker
    - New builds opt into `--emit-kpack` flag
    - Gradual migration over time
@@ -1889,18 +1916,20 @@ This section outlines potential improvements beyond the initial implementation.
 **Approach**:
 
 1. **Training Phase**: Analyze all kernels in a library to build a shared dictionary
+
    ```bash
    zstd --train -r lib/rocblas/*.hsaco -o rocblas.dict
    ```
 
-2. **Compression Phase**: Compress each kernel using the shared dictionary
+1. **Compression Phase**: Compress each kernel using the shared dictionary
+
    ```bash
    zstd -D rocblas.dict kernel.hsaco
    ```
 
-3. **TOC Storage**: Embed dictionary in kpack header, reference it in per-kernel metadata
+1. **TOC Storage**: Embed dictionary in kpack header, reference it in per-kernel metadata
 
-4. **Decompression**: Load dictionary once, reuse for all kernel decompression
+1. **Decompression**: Load dictionary once, reuse for all kernel decompression
 
 **Tradeoff**: Dictionary overhead (~100KB) amortized across many kernels. Not beneficial for binaries with few kernels.
 
@@ -1909,23 +1938,27 @@ This section outlines potential improvements beyond the initial implementation.
 Beyond dictionary training, additional compression opportunities exist by exploiting structural similarities across kernels:
 
 1. **Semantic Block Sorting**: Reorder instruction blocks within kernels to maximize similarity
+
    - Group similar code sequences (prologue, epilogue, loop bodies) across kernels
    - Sort blocks by semantic purpose before compression
    - Example: All kernels' register save/restore prologues grouped together
    - Enables better cross-frame pattern matching in zstd
 
-2. **Cross-Frame Reference Compression**: Exploit similarities across multiple kernel frames
+1. **Cross-Frame Reference Compression**: Exploit similarities across multiple kernel frames
+
    - Instead of compressing each kernel independently, compress sequences of related kernels
    - Example: Compress all GEMM kernels for different tile sizes as a sequence
    - Allows zstd to reference patterns from previous frames
    - Particularly effective for parameterized kernel families (same logic, different constants)
 
-3. **Metadata Separation**: Extract and compress metadata separately from code
+1. **Metadata Separation**: Extract and compress metadata separately from code
+
    - ELF headers, symbol tables, and debug info often highly redundant across kernels
    - Separate metadata into dedicated compression stream
    - Code-only compression can use more aggressive settings
 
-4. **Instruction-Level Deduplication**: Identify and deduplicate common instruction sequences
+1. **Instruction-Level Deduplication**: Identify and deduplicate common instruction sequences
+
    - Many kernels share identical subroutines (e.g., reduction, transpose)
    - Extract common sequences to shared "subroutine pool"
    - Kernels reference pool entries instead of duplicating code
@@ -1936,10 +1969,11 @@ Beyond dictionary training, additional compression opportunities exist by exploi
 These advanced techniques should be pursued **after** establishing the basic apples-to-apples per-kernel compression scheme. The initial implementation provides a baseline for comparison and validates the kpack infrastructure before adding compression complexity.
 
 **Phased Rollout**:
+
 1. **Phase 1** (current): Per-kernel zstd compression (baseline)
-2. **Phase 2**: Dictionary-trained compression
-3. **Phase 3**: Semantic block sorting + cross-frame compression
-4. **Phase 4**: Full instruction-level deduplication
+1. **Phase 2**: Dictionary-trained compression
+1. **Phase 3**: Semantic block sorting + cross-frame compression
+1. **Phase 4**: Full instruction-level deduplication
 
 **Note**: Separate analysis exists for detailed evaluation of these techniques. The basic per-kernel scheme establishes the foundation and measurement baseline before pursuing advanced optimizations.
 
@@ -1952,19 +1986,21 @@ These advanced techniques should be pursued **after** establishing the basic app
 **Approach**:
 
 1. **Streaming API**:
+
    ```python
    with KpackWriter(path, compression="zstd") as writer:
        for kernel in kernels:
            writer.add_kernel(name, arch, kernel_data)
    ```
 
-2. **Implementation**:
+1. **Implementation**:
+
    - Write header and blob data immediately
    - Accumulate TOC in memory (small compared to blobs)
    - Write TOC at finalization
    - Update header's TOC offset
 
-3. **Memory Savings**: O(num_kernels) metadata vs. O(total_kernel_bytes) blob data
+1. **Memory Savings**: O(num_kernels) metadata vs. O(total_kernel_bytes) blob data
 
 **Expected Benefit**: Enable packing of libraries with 100K+ kernels without memory constraints.
 
@@ -1975,16 +2011,19 @@ These advanced techniques should be pursued **after** establishing the basic app
 **Approach**:
 
 1. **Content-Addressing**: Hash each kernel (SHA256 or xxHash)
-2. **Deduplication**: Store each unique kernel once, reference by hash
-3. **TOC Structure**:
+
+1. **Deduplication**: Store each unique kernel once, reference by hash
+
+1. **TOC Structure**:
+
    ```python
    "toc": {
        "bin/hipcc/gfx1100": {"hash": "abc123...", "ordinal": 5},
-       "lib/libhip.so/gfx1100": {"hash": "abc123...", "ordinal": 5}
+       "lib/libhip.so/gfx1100": {"hash": "abc123...", "ordinal": 5},
    }
    ```
 
-4. **Blob Storage**: Single copy at ordinal 5
+1. **Blob Storage**: Single copy at ordinal 5
 
 **Tradeoff**: Increased TOC complexity, hash computation overhead.
 
@@ -1997,17 +2036,19 @@ These advanced techniques should be pursued **after** establishing the basic app
 **Approach**:
 
 1. **Hierarchical TOC**:
+
    ```python
    {
        "binary_index": {
            "bin/hipcc": {offset: 1024, size: 256},
-           "lib/libhip.so": {offset: 1280, size: 512}
+           "lib/libhip.so": {offset: 1280, size: 512},
        }
    }
    ```
 
-2. **Lazy Deserialization**: Parse only relevant binary's TOC section
-3. **Separate Index File**: Optional `.kpack.idx` sidecar for faster lookup
+1. **Lazy Deserialization**: Parse only relevant binary's TOC section
+
+1. **Separate Index File**: Optional `.kpack.idx` sidecar for faster lookup
 
 **Expected Benefit**: O(1) vs. O(num_binaries) TOC access for kpack with many binaries.
 
@@ -2020,8 +2061,8 @@ These advanced techniques should be pursued **after** establishing the basic app
 **Approach**:
 
 1. **TOC Chunking**: Split TOC into chunks by binary or architecture
-2. **Memory Mapping**: mmap() the kpack file, access TOC chunks on-demand
-3. **LRU Cache**: Keep recently accessed TOC chunks in memory
+1. **Memory Mapping**: mmap() the kpack file, access TOC chunks on-demand
+1. **LRU Cache**: Keep recently accessed TOC chunks in memory
 
 **Expected Benefit**: Constant memory usage regardless of kpack size.
 
@@ -2036,9 +2077,9 @@ These advanced techniques should be pursued **after** establishing the basic app
 **Approach**:
 
 1. **Check Compression**: If compression="none", use mmap() path
-2. **mmap() kpack file**: Map entire file or kernel region
-3. **Return pointer**: kpack_get_kernel() returns pointer into mmap'd region
-4. **munmap() on close**: Clean up at kpack_close()
+1. **mmap() kpack file**: Map entire file or kernel region
+1. **Return pointer**: kpack_get_kernel() returns pointer into mmap'd region
+1. **munmap() on close**: Clean up at kpack_close()
 
 **Expected Benefit**: Eliminate memory copy for uncompressed kernels, faster load times.
 
@@ -2053,6 +2094,7 @@ These advanced techniques should be pursued **after** establishing the basic app
 **Approach**:
 
 1. **Wheel Structure**:
+
    ```
    torch-2.0.0-py3-none-manylinux_2_17_x86_64.whl
    ├── torch/
@@ -2063,12 +2105,14 @@ These advanced techniques should be pursued **after** establishing the basic app
    │       └── torch-{arch}.kpack (optional, downloaded per-arch)
    ```
 
-2. **Installation Flow**:
+1. **Installation Flow**:
+
    - `pip install torch`: Downloads base wheel (no device code)
    - Auto-detect GPU: `python -m torch.utils.hipconfig --arch`
    - Download arch-specific kpack: `pip install torch[gfx1100]`
 
-3. **WheelNext Extension**:
+1. **WheelNext Extension**:
+
    ```json
    {
        "extras_require": {
@@ -2080,7 +2124,7 @@ These advanced techniques should be pursued **after** establishing the basic app
 
 **Tradeoff**: Requires WheelNext adoption, pip tooling changes, mirror infrastructure.
 
----
+______________________________________________________________________
 
 ## Appendix: File Format Specifications
 
@@ -2127,7 +2171,7 @@ Program Headers:
   ...
 ```
 
----
+______________________________________________________________________
 
 ## References
 

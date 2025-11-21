@@ -84,9 +84,7 @@ class UnbundlingVisitor(ArtifactVisitor):
         binary_dest.parent.mkdir(parents=True, exist_ok=True)
         bundled_binary.create_host_only(binary_dest)
 
-    def visit_kernel_database(
-        self, artifact_path: ArtifactPath, database
-    ) -> None:
+    def visit_kernel_database(self, artifact_path: ArtifactPath, database) -> None:
         """Copy kernel database artifacts preserving structure."""
         self.visited_databases.append(artifact_path.relative_path)
 
@@ -137,26 +135,25 @@ def bundled_test_tree(tmp_path: Path, toolchain: Toolchain) -> Path:
         bins_dir / "test_kernel_multi.exe",
         kpack_search_paths=["test.kpack"],
         kernel_name="test_kernel",
-        toolchain=toolchain
+        toolchain=toolchain,
     )
     binutils.add_kpack_ref_marker(
         assets_dir / "libtest_kernel_single.so",
         bins_dir / "libtest_kernel_single.so",
         kpack_search_paths=["test.kpack"],
         kernel_name="test_kernel",
-        toolchain=toolchain
+        toolchain=toolchain,
     )
 
     # Copy host-only binary (should be treated as opaque)
-    shutil.copy2(
-        assets_dir / "host_only.exe",
-        bins_dir / "host_only.exe"
-    )
+    shutil.copy2(assets_dir / "host_only.exe", bins_dir / "host_only.exe")
 
     return root
 
 
-def test_unbundling_visitor_unbundles_binaries(bundled_test_tree: Path, tmp_path: Path, toolchain: Toolchain):
+def test_unbundling_visitor_unbundles_binaries(
+    bundled_test_tree: Path, tmp_path: Path, toolchain: Toolchain
+):
     """Test that UnbundlingVisitor correctly unbundles bundled binaries."""
     output_dir = tmp_path / "output"
     output_dir.mkdir()
@@ -196,16 +193,30 @@ def test_unbundling_visitor_unbundles_binaries(bundled_test_tree: Path, tmp_path
     assert (output_dir / "bins" / "libtest_kernel_single.so").exists()
 
     # Verify host-only binaries are smaller than originals (device code removed)
-    original_multi_size = (bundled_test_tree / "bins" / "test_kernel_multi.exe").stat().st_size
-    host_only_multi_size = (output_dir / "bins" / "test_kernel_multi.exe").stat().st_size
-    assert host_only_multi_size < original_multi_size, "Host-only binary should be smaller"
+    original_multi_size = (
+        (bundled_test_tree / "bins" / "test_kernel_multi.exe").stat().st_size
+    )
+    host_only_multi_size = (
+        (output_dir / "bins" / "test_kernel_multi.exe").stat().st_size
+    )
+    assert (
+        host_only_multi_size < original_multi_size
+    ), "Host-only binary should be smaller"
 
-    original_single_size = (bundled_test_tree / "bins" / "libtest_kernel_single.so").stat().st_size
-    host_only_single_size = (output_dir / "bins" / "libtest_kernel_single.so").stat().st_size
-    assert host_only_single_size < original_single_size, "Host-only library should be smaller"
+    original_single_size = (
+        (bundled_test_tree / "bins" / "libtest_kernel_single.so").stat().st_size
+    )
+    host_only_single_size = (
+        (output_dir / "bins" / "libtest_kernel_single.so").stat().st_size
+    )
+    assert (
+        host_only_single_size < original_single_size
+    ), "Host-only library should be smaller"
 
 
-def test_unbundling_visitor_counts(bundled_test_tree: Path, tmp_path: Path, toolchain: Toolchain):
+def test_unbundling_visitor_counts(
+    bundled_test_tree: Path, tmp_path: Path, toolchain: Toolchain
+):
     """Test that UnbundlingVisitor tracks visited artifacts correctly."""
     output_dir = tmp_path / "output"
     output_dir.mkdir()
@@ -234,7 +245,9 @@ def test_unbundling_visitor_counts(bundled_test_tree: Path, tmp_path: Path, tool
     assert Path("bins/libtest_kernel_single.so") in visitor.visited_bundled_binaries
 
 
-def test_unbundling_visitor_architecture_extraction(bundled_test_tree: Path, tmp_path: Path, toolchain: Toolchain):
+def test_unbundling_visitor_architecture_extraction(
+    bundled_test_tree: Path, tmp_path: Path, toolchain: Toolchain
+):
     """Test that unbundled .co files have correct architecture names."""
     output_dir = tmp_path / "output"
     output_dir.mkdir()

@@ -11,6 +11,7 @@ import msgpack
 
 class BinaryType(Enum):
     """Type of bundled binary file."""
+
     STANDALONE = "standalone"  # .co files - directly in bundler format
     BUNDLED = "bundled"  # Executables/libraries with .hip_fatbin ELF section
 
@@ -88,7 +89,9 @@ class Toolchain:
         return self._readelf_cached
 
     def exec_capture_text(self, args: list[str | Path]):
-        return subprocess.check_output([str(a) for a in args], stderr=subprocess.STDOUT).decode()
+        return subprocess.check_output(
+            [str(a) for a in args], stderr=subprocess.STDOUT
+        ).decode()
 
     def exec(self, args: list[str | Path]):
         # Use check_output to capture stderr in exceptions (discarding the output)
@@ -272,9 +275,14 @@ class BundledBinary:
             # Check if this is the known decompression bug with CCOB bundles
             # Issue: https://github.com/ROCm/llvm-project/issues/448
             # (stderr is merged into stdout by exec_capture_text)
-            error_msg = e.output.decode() if isinstance(e.output, bytes) else str(e.output)
+            error_msg = (
+                e.output.decode() if isinstance(e.output, bytes) else str(e.output)
+            )
 
-            if "decompress" in error_msg.lower() or "src size is incorrect" in error_msg.lower():
+            if (
+                "decompress" in error_msg.lower()
+                or "src size is incorrect" in error_msg.lower()
+            ):
                 # Fall back to our CCOB parser
                 return self._list_bundled_targets_with_ccob_parser(bundler_input)
             # Re-raise other errors
@@ -291,7 +299,9 @@ class BundledBinary:
             (target_name, _map(target_name)) for target_name in lines if target_name
         ]
 
-    def _list_bundled_targets_with_ccob_parser(self, fatbin_path: Path) -> list[tuple[str, str]]:
+    def _list_bundled_targets_with_ccob_parser(
+        self, fatbin_path: Path
+    ) -> list[tuple[str, str]]:
         """Fallback: List targets using our CCOB parser when clang-offload-bundler fails.
 
         Args:
@@ -344,16 +354,25 @@ class BundledBinary:
             # Check if this is the known decompression bug with CCOB bundles
             # Issue: https://github.com/ROCm/llvm-project/issues/448
             # (stderr is merged into stdout/output by exec)
-            error_msg = e.output.decode() if isinstance(e.output, bytes) else str(e.output)
+            error_msg = (
+                e.output.decode() if isinstance(e.output, bytes) else str(e.output)
+            )
 
-            if "decompress" in error_msg.lower() or "src size is incorrect" in error_msg.lower():
+            if (
+                "decompress" in error_msg.lower()
+                or "src size is incorrect" in error_msg.lower()
+            ):
                 # Fall back to our CCOB parser
-                self._unbundle_with_ccob_parser(bundler_input, targets=targets, outputs=outputs)
+                self._unbundle_with_ccob_parser(
+                    bundler_input, targets=targets, outputs=outputs
+                )
             else:
                 # Re-raise other errors
                 raise
 
-    def _unbundle_with_ccob_parser(self, fatbin_path: Path, *, targets: list[str], outputs: list[Path]):
+    def _unbundle_with_ccob_parser(
+        self, fatbin_path: Path, *, targets: list[str], outputs: list[Path]
+    ):
         """Fallback: Unbundle using our CCOB parser when clang-offload-bundler fails.
 
         Args:
@@ -364,7 +383,9 @@ class BundledBinary:
         from rocm_kpack.ccob_parser import parse_ccob_file
 
         if len(targets) != len(outputs):
-            raise ValueError(f"targets and outputs must have same length: {len(targets)} != {len(outputs)}")
+            raise ValueError(
+                f"targets and outputs must have same length: {len(targets)} != {len(outputs)}"
+            )
 
         # Parse the CCOB bundle
         bundle = parse_ccob_file(fatbin_path)
@@ -421,6 +442,7 @@ class BundledBinary:
         # Use ELF offload kpacker (actually reclaims disk space)
         # Import here to avoid circular dependency
         from rocm_kpack.elf_offload_kpacker import kpack_offload_binary
+
         kpack_offload_binary(self.file_path, output_path, toolchain=self.toolchain)
 
     def remove_section_simple(self, output_path: Path, section_name: str) -> None:

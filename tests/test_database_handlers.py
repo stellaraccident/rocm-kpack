@@ -303,7 +303,9 @@ class TestAotritonHandler:
 
     def test_detect_deeply_nested_file(self, handler, prefix_root):
         """Test detection of file nested multiple levels under architecture directory."""
-        file_path = prefix_root / "lib/aotriton/kernels/gfx1100/subdir/deep/kernel.hsaco"
+        file_path = (
+            prefix_root / "lib/aotriton/kernels/gfx1100/subdir/deep/kernel.hsaco"
+        )
         file_path.parent.mkdir(parents=True)
         file_path.touch()
 

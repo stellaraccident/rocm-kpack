@@ -144,9 +144,7 @@ Examples:
     extract_parser.add_argument(
         "binary_path", help="Binary path in archive (e.g., lib/librocblas.so.5.1)"
     )
-    extract_parser.add_argument(
-        "arch", help="Architecture to extract (e.g., gfx1100)"
-    )
+    extract_parser.add_argument("arch", help="Architecture to extract (e.g., gfx1100)")
     extract_parser.add_argument(
         "-o", "--output", required=True, help="Output file path"
     )

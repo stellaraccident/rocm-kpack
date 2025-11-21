@@ -11,7 +11,12 @@ from dataclasses import dataclass
 
 import msgpack
 
-from .compression import Compressor, CompressionInput, NoOpCompressor, create_compressor_from_toc
+from .compression import (
+    Compressor,
+    CompressionInput,
+    NoOpCompressor,
+    create_compressor_from_toc,
+)
 
 
 @dataclass
@@ -265,9 +270,7 @@ class PackedKernelArchive:
             RuntimeError: If archive not finalized
         """
         if not self._archive_finalized:
-            raise RuntimeError(
-                "Archive not finalized. Call finalize_archive() first."
-            )
+            raise RuntimeError("Archive not finalized. Call finalize_archive() first.")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -283,7 +286,9 @@ class PackedKernelArchive:
 
             # Pad to first blob alignment boundary
             current_pos = f.tell()
-            padding = (self.BLOB_ALIGNMENT - (current_pos % self.BLOB_ALIGNMENT)) % self.BLOB_ALIGNMENT
+            padding = (
+                self.BLOB_ALIGNMENT - (current_pos % self.BLOB_ALIGNMENT)
+            ) % self.BLOB_ALIGNMENT
             f.write(b"\x00" * padding)
 
             # Write compressed blob

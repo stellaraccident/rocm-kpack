@@ -16,7 +16,7 @@ from typing import Optional, List
 # Compile regex patterns once at module level
 # TODO: Verify this pattern handles xnack (asan) kernels correctly
 # These have special syntax like gfx942:xnack+ or gfx90a:sramecc+:xnack-
-_GFX_ARCH_PATTERN = re.compile(r'gfx(\d+[a-z]*)')
+_GFX_ARCH_PATTERN = re.compile(r"gfx(\d+[a-z]*)")
 
 
 class DatabaseHandler(ABC):
@@ -81,7 +81,7 @@ class RocBLASHandler(DatabaseHandler):
                 return None
 
             # Check file extension
-            if path.suffix not in ['.co', '.hsaco', '.dat']:
+            if path.suffix not in [".co", ".hsaco", ".dat"]:
                 return None
 
             # Extract architecture from filename
@@ -119,7 +119,7 @@ class HipBLASLtHandler(DatabaseHandler):
                 return None
 
             # Check file extension
-            if path.suffix not in ['.co', '.hsaco', '.dat']:
+            if path.suffix not in [".co", ".hsaco", ".dat"]:
                 return None
 
             # Extract architecture from filename
@@ -151,7 +151,11 @@ class AotritonHandler(DatabaseHandler):
 
             # Look for aotriton/kernels in the path
             for i, part in enumerate(path_parts[:-1]):
-                if part == "aotriton" and i + 1 < len(path_parts) and path_parts[i + 1] == "kernels":
+                if (
+                    part == "aotriton"
+                    and i + 1 < len(path_parts)
+                    and path_parts[i + 1] == "kernels"
+                ):
                     # Check if next part is an architecture
                     if i + 2 < len(path_parts):
                         arch_part = path_parts[i + 2]
@@ -190,7 +194,9 @@ def get_database_handlers(names: List[str]) -> List[DatabaseHandler]:
     for name in names:
         if name not in AVAILABLE_HANDLERS:
             available = ", ".join(sorted(AVAILABLE_HANDLERS.keys()))
-            raise ValueError(f"Unknown database handler: {name}. Available: {available}")
+            raise ValueError(
+                f"Unknown database handler: {name}. Available: {available}"
+            )
         handlers.append(AVAILABLE_HANDLERS[name]())
     return handlers
 

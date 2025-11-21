@@ -8,7 +8,9 @@ from rocm_kpack.elf_offload_kpacker import kpack_offload_binary, ElfOffloadKpack
 from rocm_kpack import binutils
 
 
-def test_kpack_fat_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
+def test_kpack_fat_binary(
+    tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain
+):
     """Test kpacking a fat binary with .hip_fatbin section."""
     # Use a multi-arch bundled binary
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
@@ -21,14 +23,16 @@ def test_kpack_fat_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binu
         marked_binary,
         kpack_search_paths=["test.kpack"],
         kernel_name="test_kernel",
-        toolchain=toolchain
+        toolchain=toolchain,
     )
 
     # Get original size
     original_size = marked_binary.stat().st_size
 
     # Kpack
-    result = kpack_offload_binary(marked_binary, output_binary, toolchain=toolchain, verbose=True)
+    result = kpack_offload_binary(
+        marked_binary, output_binary, toolchain=toolchain, verbose=True
+    )
 
     # Verify output exists
     assert output_binary.exists()
@@ -42,18 +46,14 @@ def test_kpack_fat_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binu
 
     # Verify output is a valid ELF file
     readelf_result = subprocess.run(
-        [toolchain.readelf, "-h", output_binary],
-        capture_output=True,
-        text=True
+        [toolchain.readelf, "-h", output_binary], capture_output=True, text=True
     )
     assert readelf_result.returncode == 0
     assert "ELF" in readelf_result.stdout
 
     # Verify .hip_fatbin section is gone (should be SHT_NULL or not listed)
     sections_result = subprocess.run(
-        [toolchain.readelf, "-S", output_binary],
-        capture_output=True,
-        text=True
+        [toolchain.readelf, "-S", output_binary], capture_output=True, text=True
     )
     assert sections_result.returncode == 0
     # Either the section is marked as NULL or doesn't appear with size > 0
@@ -65,9 +65,13 @@ def test_kpack_fat_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binu
     assert os.access(output_binary, os.X_OK), "Output binary should be executable"
 
 
-def test_kpack_shared_library(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
+def test_kpack_shared_library(
+    tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain
+):
     """Test kpacking a shared library with .hip_fatbin section."""
-    input_library = test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_single.so"
+    input_library = (
+        test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_single.so"
+    )
     marked_library = tmp_path / "libtest_kernel_single_marked.so"
     output_library = tmp_path / "libtest_kernel_single_kpacked.so"
 
@@ -77,12 +81,14 @@ def test_kpack_shared_library(tmp_path: Path, test_assets_dir: Path, toolchain: 
         marked_library,
         kpack_search_paths=["test.kpack"],
         kernel_name="test_kernel",
-        toolchain=toolchain
+        toolchain=toolchain,
     )
 
     original_size = marked_library.stat().st_size
 
-    result = kpack_offload_binary(marked_library, output_library, toolchain=toolchain, verbose=True)
+    result = kpack_offload_binary(
+        marked_library, output_library, toolchain=toolchain, verbose=True
+    )
 
     # Verify size reduction
     assert output_library.exists()
@@ -91,15 +97,15 @@ def test_kpack_shared_library(tmp_path: Path, test_assets_dir: Path, toolchain: 
 
     # Verify it's still a valid shared library
     readelf_result = subprocess.run(
-        [toolchain.readelf, "-h", output_library],
-        capture_output=True,
-        text=True
+        [toolchain.readelf, "-h", output_library], capture_output=True, text=True
     )
     assert readelf_result.returncode == 0
     assert "DYN (Shared object file)" in readelf_result.stdout
 
 
-def test_kpack_host_only_binary(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
+def test_kpack_host_only_binary(
+    tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain
+):
     """Test kpacking a binary without .hip_fatbin (should just copy)."""
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/host_only.exe"
     marked_binary = tmp_path / "host_only_marked.exe"
@@ -111,17 +117,21 @@ def test_kpack_host_only_binary(tmp_path: Path, test_assets_dir: Path, toolchain
         marked_binary,
         kpack_search_paths=["test.kpack"],
         kernel_name="test_kernel",
-        toolchain=toolchain
+        toolchain=toolchain,
     )
 
     original_size = marked_binary.stat().st_size
 
-    result = kpack_offload_binary(marked_binary, output_binary, toolchain=toolchain, verbose=True)
+    result = kpack_offload_binary(
+        marked_binary, output_binary, toolchain=toolchain, verbose=True
+    )
 
     # Binary should be processed (mapping .rocm_kpack_ref adds overhead)
     assert output_binary.exists()
     # Mapping the section adds padding, so output may be larger
-    assert result["removed"] <= 0  # No .hip_fatbin to remove, so "removed" is negative (size increased)
+    assert (
+        result["removed"] <= 0
+    )  # No .hip_fatbin to remove, so "removed" is negative (size increased)
     assert result["original_size"] == original_size
     assert result["new_size"] == output_binary.stat().st_size
 
@@ -160,9 +170,13 @@ def test_kpacker_calculate_removal_plan(test_assets_dir: Path):
     assert isinstance(plan["phdrs_to_update"], list)
 
 
-def test_integration_with_binutils_create_host_only(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
+def test_integration_with_binutils_create_host_only(
+    tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain
+):
     """Test that BundledBinary.create_host_only() uses the kpacker by default."""
-    input_binary = test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
+    input_binary = (
+        test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
+    )
     marked_binary = tmp_path / "libtest_kernel_multi_marked.so"
     output_binary = tmp_path / "libtest_kernel_multi_host_only.so"
 
@@ -172,7 +186,7 @@ def test_integration_with_binutils_create_host_only(tmp_path: Path, test_assets_
         marked_binary,
         kpack_search_paths=["test.kpack"],
         kernel_name="test_kernel",
-        toolchain=toolchain
+        toolchain=toolchain,
     )
 
     original_size = marked_binary.stat().st_size
@@ -197,7 +211,9 @@ def test_integration_with_binutils_create_host_only(tmp_path: Path, test_assets_
     assert kpacker_reduction > objcopy_reduction
 
 
-def test_kpacked_binary_compatible_with_objcopy(tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain):
+def test_kpacked_binary_compatible_with_objcopy(
+    tmp_path: Path, test_assets_dir: Path, toolchain: binutils.Toolchain
+):
     """Test that objcopy --add-section works on kpacked binaries."""
     input_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
     marked_binary = tmp_path / "test_kernel_multi_marked.exe"
@@ -209,11 +225,13 @@ def test_kpacked_binary_compatible_with_objcopy(tmp_path: Path, test_assets_dir:
         marked_binary,
         kpack_search_paths=["test.kpack"],
         kernel_name="test_kernel",
-        toolchain=toolchain
+        toolchain=toolchain,
     )
 
     # Neutralize the binary
-    kpack_offload_binary(marked_binary, output_binary, toolchain=toolchain, verbose=True)
+    kpack_offload_binary(
+        marked_binary, output_binary, toolchain=toolchain, verbose=True
+    )
 
     # Verify kpacked binary exists
     assert output_binary.exists()
@@ -251,7 +269,9 @@ def test_kpacked_binary_compatible_with_objcopy(tmp_path: Path, test_assets_dir:
         text=True,
         check=True,
     )
-    assert ".test_marker" in readelf_result.stdout, "Marker section should be present in binary"
+    assert (
+        ".test_marker" in readelf_result.stdout
+    ), "Marker section should be present in binary"
 
     # Verify the binary is still valid
     assert output_with_marker.exists()

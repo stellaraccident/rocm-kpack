@@ -67,55 +67,59 @@ Input directory structure:
         ├── blas_lib_generic/
         ├── blas_lib_gfx1200/
         └── blas_lib_gfx1201/
-"""
+""",
     )
 
     parser.add_argument(
         "--input-shards-dir",
         type=Path,
         required=True,
-        help="Directory containing shard subdirectories from map phase"
+        help="Directory containing shard subdirectories from map phase",
     )
 
     parser.add_argument(
         "--config",
         type=Path,
         required=True,
-        help="JSON configuration file defining package groups"
+        help="JSON configuration file defining package groups",
     )
 
     parser.add_argument(
         "--output-dir",
         type=Path,
         required=True,
-        help="Output directory for combined artifacts"
+        help="Output directory for combined artifacts",
     )
 
     parser.add_argument(
         "--component",
         type=str,
-        help="Only process specific component (e.g., 'rocblas_lib')"
+        help="Only process specific component (e.g., 'rocblas_lib')",
     )
 
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose output"
-    )
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
 
     args = parser.parse_args()
 
     # Validate arguments
     if not args.input_shards_dir.exists():
-        print(f"Error: Input shards directory does not exist: {args.input_shards_dir}", file=sys.stderr)
+        print(
+            f"Error: Input shards directory does not exist: {args.input_shards_dir}",
+            file=sys.stderr,
+        )
         return 2
 
     if not args.input_shards_dir.is_dir():
-        print(f"Error: Input shards path is not a directory: {args.input_shards_dir}", file=sys.stderr)
+        print(
+            f"Error: Input shards path is not a directory: {args.input_shards_dir}",
+            file=sys.stderr,
+        )
         return 2
 
     if not args.config.exists():
-        print(f"Error: Configuration file does not exist: {args.config}", file=sys.stderr)
+        print(
+            f"Error: Configuration file does not exist: {args.config}", file=sys.stderr
+        )
         return 2
 
     # Load configuration
@@ -142,9 +146,7 @@ Input directory structure:
     print("-" * 70)
 
     collector = ArtifactCollector(
-        args.input_shards_dir,
-        config.primary_shard,
-        verbose=args.verbose
+        args.input_shards_dir, config.primary_shard, verbose=args.verbose
     )
 
     try:
@@ -165,8 +167,14 @@ Input directory structure:
     # Filter to specific component if requested
     if args.component:
         if args.component not in components:
-            print(f"Error: Component '{args.component}' not found in artifacts", file=sys.stderr)
-            print(f"Available components: {', '.join(sorted(components))}", file=sys.stderr)
+            print(
+                f"Error: Component '{args.component}' not found in artifacts",
+                file=sys.stderr,
+            )
+            print(
+                f"Available components: {', '.join(sorted(components))}",
+                file=sys.stderr,
+            )
             return 1
         components = {args.component}
 
@@ -188,15 +196,15 @@ Input directory structure:
         for group_name, arch_group in config.architecture_groups.items():
             try:
                 combiner.combine_component(
-                    component_name,
-                    group_name,
-                    arch_group,
-                    args.output_dir
+                    component_name, group_name, arch_group, args.output_dir
                 )
                 success_count += 1
 
             except (ValueError, RuntimeError, OSError) as e:
-                print(f"  Error combining {component_name} for group {group_name}: {e}", file=sys.stderr)
+                print(
+                    f"  Error combining {component_name} for group {group_name}: {e}",
+                    file=sys.stderr,
+                )
                 error_count += 1
 
                 if args.verbose:

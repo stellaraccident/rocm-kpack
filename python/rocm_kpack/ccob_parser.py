@@ -32,6 +32,7 @@ class CCOBHeader:
         uncompressed_size: Size after decompression
         hash: Truncated MD5 hash
     """
+
     magic: str
     version: int
     compression_method: int
@@ -65,12 +66,12 @@ class CCOBHeader:
         if len(data) < 32:
             raise ValueError(f"Header too short: {len(data)} bytes (need 32)")
 
-        magic = data[0:4].decode('ascii', errors='replace')
+        magic = data[0:4].decode("ascii", errors="replace")
         if magic != "CCOB":
             raise ValueError(f"Invalid magic: {magic!r} (expected 'CCOB')")
 
         # Parse version to determine header format
-        version_raw = struct.unpack('<I', data[4:8])[0]
+        version_raw = struct.unpack("<I", data[4:8])[0]
 
         # Extract version number from lower 16 bits
         version = version_raw & 0xFFFF
@@ -78,14 +79,14 @@ class CCOBHeader:
 
         # Version 1.3 uses 64-bit sizes
         if version == 3:
-            total_size = struct.unpack('<Q', data[8:16])[0]
-            uncompressed_size = struct.unpack('<Q', data[16:24])[0]
-            hash_val = struct.unpack('<Q', data[24:32])[0]
+            total_size = struct.unpack("<Q", data[8:16])[0]
+            uncompressed_size = struct.unpack("<Q", data[16:24])[0]
+            hash_val = struct.unpack("<Q", data[24:32])[0]
         else:
             # Version 1.2 uses 32-bit sizes
-            total_size = struct.unpack('<I', data[8:12])[0]
-            uncompressed_size = struct.unpack('<I', data[12:16])[0]
-            hash_val = struct.unpack('<Q', data[16:24])[0]
+            total_size = struct.unpack("<I", data[8:12])[0]
+            uncompressed_size = struct.unpack("<I", data[12:16])[0]
+            hash_val = struct.unpack("<Q", data[16:24])[0]
 
         return cls(
             magic=magic,
@@ -107,6 +108,7 @@ class BundleEntry:
         triple_size: Size of triple string
         triple: Target triple (e.g., "hipv4-amdgcn-amd-amdhsa--gfx1100")
     """
+
     offset: int
     size: int
     triple_size: int
@@ -123,6 +125,7 @@ class UncompressedBundle:
         entries: List of bundle entries
         data: Full uncompressed data blob
     """
+
     magic: str
     num_entries: int
     entries: list[BundleEntry]
@@ -159,11 +162,11 @@ class UncompressedBundle:
         if len(data) < 32:
             raise ValueError(f"Bundle too short: {len(data)} bytes")
 
-        magic = data[0:24].rstrip(b'\x00').decode('ascii', errors='replace')
+        magic = data[0:24].rstrip(b"\x00").decode("ascii", errors="replace")
         if not magic.startswith("__CLANG_OFFLOAD_BUNDLE__"):
             raise ValueError(f"Invalid bundle magic: {magic!r}")
 
-        num_entries = struct.unpack('<Q', data[24:32])[0]
+        num_entries = struct.unpack("<Q", data[24:32])[0]
 
         entries = []
         pos = 32
@@ -172,23 +175,25 @@ class UncompressedBundle:
             if pos + 24 > len(data):
                 raise ValueError(f"Entry {i} header truncated at offset {pos}")
 
-            offset = struct.unpack('<Q', data[pos:pos+8])[0]
-            size = struct.unpack('<Q', data[pos+8:pos+16])[0]
-            triple_size = struct.unpack('<Q', data[pos+16:pos+24])[0]
+            offset = struct.unpack("<Q", data[pos : pos + 8])[0]
+            size = struct.unpack("<Q", data[pos + 8 : pos + 16])[0]
+            triple_size = struct.unpack("<Q", data[pos + 16 : pos + 24])[0]
             pos += 24
 
             if pos + triple_size > len(data):
                 raise ValueError(f"Entry {i} triple truncated at offset {pos}")
 
-            triple = data[pos:pos+triple_size].decode('ascii', errors='replace')
+            triple = data[pos : pos + triple_size].decode("ascii", errors="replace")
             pos += triple_size
 
-            entries.append(BundleEntry(
-                offset=offset,
-                size=size,
-                triple_size=triple_size,
-                triple=triple,
-            ))
+            entries.append(
+                BundleEntry(
+                    offset=offset,
+                    size=size,
+                    triple_size=triple_size,
+                    triple=triple,
+                )
+            )
 
         return cls(
             magic=magic,
@@ -208,7 +213,7 @@ class UncompressedBundle:
         """
         for entry in self.entries:
             if entry.triple == triple:
-                return self.data[entry.offset:entry.offset + entry.size]
+                return self.data[entry.offset : entry.offset + entry.size]
         return None
 
     def list_triples(self) -> list[str]:
@@ -246,7 +251,7 @@ def decompress_ccob(data: bytes) -> bytes:
 
     # Extract compressed data using totalSize (not reading to EOF!)
     header_size = 32
-    compressed_data = data[header_size:header.total_size]
+    compressed_data = data[header_size : header.total_size]
 
     # Decompress using zstd
     if header.compression_method != 1:
@@ -255,8 +260,7 @@ def decompress_ccob(data: bytes) -> bytes:
     dctx = zstd.ZstdDecompressor()
     try:
         decompressed = dctx.decompress(
-            compressed_data,
-            max_output_size=header.uncompressed_size
+            compressed_data, max_output_size=header.uncompressed_size
         )
     except zstd.ZstdError as e:
         raise ValueError(f"Decompression failed: {e}") from e
@@ -308,12 +312,12 @@ def extract_ccob_from_binary(binary_path: Path, output_dir: Path) -> dict[str, P
         subprocess.CalledProcessError: If objcopy fails
     """
     # Extract .hip_fatbin section
-    with tempfile.NamedTemporaryFile(suffix='.fatbin', delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".fatbin", delete=False) as tmp:
         tmp_path = Path(tmp.name)
 
     try:
         subprocess.run(
-            ['objcopy', '--dump-section', f'.hip_fatbin={tmp_path}', str(binary_path)],
+            ["objcopy", "--dump-section", f".hip_fatbin={tmp_path}", str(binary_path)],
             check=True,
             capture_output=True,
         )
@@ -328,15 +332,15 @@ def extract_ccob_from_binary(binary_path: Path, output_dir: Path) -> dict[str, P
             # Create filename from triple
             triple = entry.triple
             # Remove host entries
-            if 'host-' in triple:
+            if "host-" in triple:
                 continue
 
             # Extract architecture (e.g., gfx1100 from hipv4-amdgcn-amd-amdhsa--gfx1100)
-            parts = triple.split('--')
+            parts = triple.split("--")
             if len(parts) >= 2:
                 arch = parts[-1]
             else:
-                arch = triple.replace('/', '_').replace('-', '_')
+                arch = triple.replace("/", "_").replace("-", "_")
 
             output_file = output_dir / f"{arch}.hsaco"
             code_obj = bundle.get_code_object(triple)

@@ -257,7 +257,9 @@ class ArtifactScanner:
             for abs_path in self._walk_tree(root_dir):
                 relative_path = abs_path.relative_to(root_dir)
                 artifact_path = ArtifactPath(root_dir, relative_path)
-                future = self.executor.submit(self._process_path, artifact_path, visitor)
+                future = self.executor.submit(
+                    self._process_path, artifact_path, visitor
+                )
                 futures.append(future)
 
             # Wait for all to complete (will raise exceptions if any occurred)
@@ -349,7 +351,7 @@ class ArtifactScanner:
         try:
             with open(file_path, "rb") as f:
                 magic = f.read(4)
-                if magic != b'\x7fELF':
+                if magic != b"\x7fELF":
                     return False
         except (OSError, IOError):
             # Can't read file, skip

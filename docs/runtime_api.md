@@ -7,12 +7,14 @@ The ROCm Kpack Runtime API provides a C library for loading and decompressing GP
 ## Design Decisions
 
 ### Library Type
+
 - **Static or shared library** via `BUILD_SHARED_LIBS` CMake option
 - Default: Static library (`librocm_kpack.a`)
 - Shared library (`librocm_kpack.so`) available with `-DBUILD_SHARED_LIBS=ON`
 - C++17 implementation with C API for maximum compatibility
 
 ### Symbol Visibility
+
 - **Hidden by default**: All symbols compiled with `-fvisibility=hidden` on POSIX
 - **Explicit exports**: Only public API functions marked with `KPACK_API` are exported
 - **Cross-platform**: Uses `__attribute__((visibility("default")))` on GCC/Clang,
@@ -21,17 +23,20 @@ The ROCm Kpack Runtime API provides a C library for loading and decompressing GP
 - **Static library**: Compiled with hidden visibility for consistency across platforms
 
 ### Dependencies
+
 - **msgpack-cxx**: Header-only MessagePack library for TOC parsing
 - **libzstd**: Zstandard decompression library
 - Both are external dependencies via `find_package()`
 
 ### Thread Safety
+
 - Multiple threads can open different archives concurrently
 - Multiple threads can query/load from same archive concurrently
 - Internal locking protects shared state (decompression context, TOC cache)
 - User must not call `kpack_close()` while other threads use the archive
 
 ### Error Handling
+
 - **Fail-fast philosophy**: Return errors immediately, no silent failures
 - **Error codes only**: Functions return descriptive error codes
 - **No global state**: No thread-local or global error strings
@@ -63,11 +68,13 @@ The ROCm Kpack Runtime API provides a C library for loading and decompressing GP
 ### Compression Schemes
 
 **NoOp (baseline)**:
+
 - Direct concatenation of `.hsaco` kernel files
 - TOC stores byte offset and size for each kernel
 - Used for testing and baseline comparison
 
 **Zstd Per-Kernel (production)**:
+
 - Each kernel compressed independently with zstd level 3
 - Blob structure: `[num_kernels: uint32][frame_size: uint32][zstd_frame]...`
 - TOC stores ordinal (frame index) for each kernel
@@ -88,13 +95,9 @@ MessagePack-encoded table of contents:
     "zstd_size": 245628,
     "toc": {
         "lib/libamdhip64.so.6": {
-            "gfx1100": {
-                "type": "hsaco",
-                "ordinal": 0,
-                "original_size": 138456
-            }
+            "gfx1100": {"type": "hsaco", "ordinal": 0, "original_size": 138456}
         }
-    }
+    },
 }
 ```
 
@@ -182,10 +185,12 @@ All functions that can fail return a `kpack_error_t` code. For I/O errors (`KPAC
 The CLR (HIP runtime) needs to detect kpack references and lazy-load kernels:
 
 1. **Detect HIPK magic** in `__hipRegisterFatBinary()`:
+
    - Check for `HIPK` magic (vs. `HIPF` for fat binaries)
    - Parse `.rocm_kpack_ref` ELF section for kpack path
 
-2. **Lazy loading** in `StatCO::digestFatBinary()`:
+1. **Lazy loading** in `StatCO::digestFatBinary()`:
+
    - Query current GPU architecture
    - Implement fallback logic: `gfx1101` → `gfx1100` → `gfx11-generic`
    - Call `kpack_get_kernel()` to load device code
@@ -196,22 +201,26 @@ The CLR (HIP runtime) needs to detect kpack references and lazy-load kernels:
 Libraries like rocBLAS, rocFFT, hipBLASLt:
 
 1. **Library initialization**:
+
    - Open kpack archive from known location
    - Query available architectures
    - Select best match for current GPU
 
-2. **Kernel selection**:
+1. **Kernel selection**:
+
    - Map problem parameters to TOC key
    - Load kernel on-demand with `kpack_get_kernel()`
    - Cache frequently-used kernels
 
-3. **Cleanup**:
+1. **Cleanup**:
+
    - Free kernels with `kpack_free_kernel()`
    - Close archive with `kpack_close()` on library shutdown
 
 ## Implementation Status
 
 ### Phase 1: Scaffolding (Current)
+
 - [x] API design documented
 - [x] Directory structure created
 - [ ] CMake build system
@@ -219,12 +228,14 @@ Libraries like rocBLAS, rocFFT, hipBLASLt:
 - [ ] Stub implementations
 
 ### Phase 2: Core Functionality
+
 - [ ] Archive opening and TOC parsing
 - [ ] NoOp decompression (uncompressed archives)
 - [ ] Zstd per-kernel decompression
 - [ ] Error handling and reporting
 
 ### Phase 3: Advanced Features
+
 - [ ] Thread-safe operations
 - [ ] Kernel caching
 - [ ] Performance optimization
@@ -249,6 +260,7 @@ ctest --test-dir build
 ## Testing
 
 Unit tests verify:
+
 - Archive opening with valid/invalid files
 - TOC parsing with various formats
 - Decompression correctness

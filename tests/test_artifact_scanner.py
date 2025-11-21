@@ -175,12 +175,12 @@ def test_copy_visitor_copies_tree_correctly(test_tree: Path, tmp_path: Path):
     assert (output_dir / "subdir2" / "kernels" / "kernel.db").read_text() == (
         "database marker"
     )
-    assert (output_dir / "subdir2" / "kernels" / "kernel_gfx1100.hsaco").read_text() == (
-        "gfx1100 kernel code"
-    )
-    assert (output_dir / "subdir2" / "kernels" / "kernel_gfx1201.hsaco").read_text() == (
-        "gfx1201 kernel code"
-    )
+    assert (
+        output_dir / "subdir2" / "kernels" / "kernel_gfx1100.hsaco"
+    ).read_text() == ("gfx1100 kernel code")
+    assert (
+        output_dir / "subdir2" / "kernels" / "kernel_gfx1201.hsaco"
+    ).read_text() == ("gfx1201 kernel code")
     assert (output_dir / "subdir2" / "kernels" / "kernel_gfx1100.dat").read_text() == (
         "gfx1100 metadata"
     )

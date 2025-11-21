@@ -59,15 +59,23 @@ def test_tree_with_bundled_binaries(tmp_path: Path, test_assets_dir: Path) -> Pa
     (root / "lib").mkdir()
 
     assets_dir = test_assets_dir / "bundled_binaries/linux/cov5"
-    shutil.copy2(assets_dir / "test_kernel_multi.exe", root / "bin" / "test_kernel_multi.exe")
-    shutil.copy2(assets_dir / "libtest_kernel_single.so", root / "lib" / "libtest_kernel_single.so")
+    shutil.copy2(
+        assets_dir / "test_kernel_multi.exe", root / "bin" / "test_kernel_multi.exe"
+    )
+    shutil.copy2(
+        assets_dir / "libtest_kernel_single.so",
+        root / "lib" / "libtest_kernel_single.so",
+    )
     shutil.copy2(assets_dir / "host_only.exe", root / "bin" / "host_only.exe")
 
     return root
 
 
 def test_packing_visitor_basic_workflow(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+    test_tree_with_bundled_binaries: Path,
+    tmp_path: Path,
+    toolchain: Toolchain,
+    executor: Executor | None,
 ):
     """Test basic packing workflow: extract kernels, create host binaries, add markers."""
     input_tree = test_tree_with_bundled_binaries
@@ -108,7 +116,10 @@ def test_packing_visitor_basic_workflow(
 
 
 def test_packing_visitor_host_only_binaries_have_markers(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+    test_tree_with_bundled_binaries: Path,
+    tmp_path: Path,
+    toolchain: Toolchain,
+    executor: Executor | None,
 ):
     """Test that host-only binaries have .rocm_kpack_ref markers."""
     input_tree = test_tree_with_bundled_binaries
@@ -156,7 +167,10 @@ def test_packing_visitor_host_only_binaries_have_markers(
 
 
 def test_packing_visitor_removes_hip_fatbin_section(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+    test_tree_with_bundled_binaries: Path,
+    tmp_path: Path,
+    toolchain: Toolchain,
+    executor: Executor | None,
 ):
     """Test that .hip_fatbin section is removed from host-only binaries."""
     input_tree = test_tree_with_bundled_binaries
@@ -195,15 +209,18 @@ def test_packing_visitor_removes_hip_fatbin_section(
     )
     # Section should still exist but be marked as NOBITS (no file content)
     assert ".hip_fatbin" in result.stdout
-    for line in result.stdout.split('\n'):
-        if '.hip_fatbin' in line:
-            assert 'NOBITS' in line, "Section should be NOBITS (neutralized)"
+    for line in result.stdout.split("\n"):
+        if ".hip_fatbin" in line:
+            assert "NOBITS" in line, "Section should be NOBITS (neutralized)"
             break
     assert ".rocm_kpack_ref" in result.stdout
 
 
 def test_packing_visitor_kpack_contains_kernels(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+    test_tree_with_bundled_binaries: Path,
+    tmp_path: Path,
+    toolchain: Toolchain,
+    executor: Executor | None,
 ):
     """Test that .kpack file contains extracted kernels."""
     input_tree = test_tree_with_bundled_binaries
@@ -249,7 +266,10 @@ def test_packing_visitor_kpack_contains_kernels(
 
 
 def test_packing_visitor_statistics(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+    test_tree_with_bundled_binaries: Path,
+    tmp_path: Path,
+    toolchain: Toolchain,
+    executor: Executor | None,
 ):
     """Test visitor statistics tracking."""
     input_tree = test_tree_with_bundled_binaries
@@ -279,7 +299,9 @@ def test_packing_visitor_statistics(
     assert stats["kernel_databases"] == 0
 
 
-def test_packing_visitor_repr(tmp_path: Path, toolchain: Toolchain, executor: Executor | None):
+def test_packing_visitor_repr(
+    tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+):
     """Test string representation."""
     visitor = PackingVisitor(
         output_root=tmp_path,
@@ -297,7 +319,10 @@ def test_packing_visitor_repr(tmp_path: Path, toolchain: Toolchain, executor: Ex
 
 
 def test_packing_visitor_relative_path_from_subdirectory(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+    test_tree_with_bundled_binaries: Path,
+    tmp_path: Path,
+    toolchain: Toolchain,
+    executor: Executor | None,
 ):
     """Test that kpack_search_paths use correct relative paths from subdirectories."""
     input_tree = test_tree_with_bundled_binaries
@@ -334,7 +359,9 @@ def test_packing_visitor_relative_path_from_subdirectory(
     # assert "../.kpack/test-gfx1100.kpack" in marker_lib["kpack_search_paths"]
 
 
-def test_packing_visitor_preserves_symlinks(tmp_path: Path, toolchain: Toolchain, executor: Executor | None):
+def test_packing_visitor_preserves_symlinks(
+    tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+):
     """Test that symlinks are preserved rather than followed."""
     input_tree = tmp_path / "input"
     output_tree = tmp_path / "output"
@@ -391,7 +418,10 @@ def test_packing_visitor_preserves_symlinks(tmp_path: Path, toolchain: Toolchain
 
 
 def test_packing_visitor_with_compression(
-    test_tree_with_bundled_binaries: Path, tmp_path: Path, toolchain: Toolchain, executor: Executor | None
+    test_tree_with_bundled_binaries: Path,
+    tmp_path: Path,
+    toolchain: Toolchain,
+    executor: Executor | None,
 ):
     """Test packing with compression enabled."""
     input_tree = test_tree_with_bundled_binaries

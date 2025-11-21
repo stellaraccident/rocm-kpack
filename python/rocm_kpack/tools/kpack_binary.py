@@ -30,11 +30,17 @@ def run(args: argparse.Namespace):
 
     print()
     print(f"Results:")
-    print(f"  Original size: {result['original_size']:,} bytes ({result['original_size'] / (1024**2):.2f} MB)")
-    print(f"  New size: {result['new_size']:,} bytes ({result['new_size'] / (1024**2):.2f} MB)")
-    print(f"  Removed: {result['removed']:,} bytes ({result['removed'] / (1024**2):.2f} MB)")
-    if result['original_size'] > 0:
-        reduction_pct = (result['removed'] / result['original_size']) * 100
+    print(
+        f"  Original size: {result['original_size']:,} bytes ({result['original_size'] / (1024**2):.2f} MB)"
+    )
+    print(
+        f"  New size: {result['new_size']:,} bytes ({result['new_size'] / (1024**2):.2f} MB)"
+    )
+    print(
+        f"  Removed: {result['removed']:,} bytes ({result['removed'] / (1024**2):.2f} MB)"
+    )
+    if result["original_size"] > 0:
+        reduction_pct = (result["removed"] / result["original_size"]) * 100
         print(f"  Reduction: {reduction_pct:.2f}%")
 
 
@@ -42,7 +48,9 @@ def main(argv: list[str]):
     p = argparse.ArgumentParser(
         description="Kpack fat binaries by removing .hip_fatbin sections and reclaiming disk space"
     )
-    p.add_argument("input", type=Path, help="Input fat binary (ELF executable or shared library)")
+    p.add_argument(
+        "input", type=Path, help="Input fat binary (ELF executable or shared library)"
+    )
     p.add_argument("output", type=Path, help="Output host-only binary")
     args = p.parse_args(argv)
     run(args)

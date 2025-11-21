@@ -5,9 +5,10 @@
 The ROCm build system produces **fat binary** artifacts containing GPU kernels for multiple architectures embedded in shared libraries. For distribution, these need to be:
 
 1. **Split** - Separate GPU kernels from host code, organize by architecture
-2. **Recombined** - Merge splits from multiple build shards into package groups
+1. **Recombined** - Merge splits from multiple build shards into package groups
 
 This enables:
+
 - Smaller package sizes (users download only their GPU architecture)
 - Faster builds (parallel builds for different GPU families)
 - Better artifact reuse across builds
@@ -113,6 +114,7 @@ ls /develop/tmp/discovery/gfx120X-build/
 ```
 
 **Discovered Architectures:**
+
 - **gfx110X-build**: gfx1100, gfx1101, gfx1102
 - **gfx1151-build**: gfx1151
 - **gfx120X-build**: gfx1200, gfx1201
@@ -158,6 +160,7 @@ EOF
 ```
 
 **Configuration Fields:**
+
 - `primary_shard`: Which shard to use for generic (host-code) artifacts
 - `architecture_groups`: Package groups and which GPU architectures go in each
 - `validation`: Rules for handling edge cases during recombination
@@ -198,18 +201,20 @@ python python/rocm_kpack/tools/split_artifacts.py \
 **What Batch Mode Does:**
 
 For each arch-specific artifact in the shard directory:
+
 1. Auto-detects artifact prefix from directory name (`blas_lib_gfx110X-dgpu` → `blas_lib`)
-2. Skips generic artifacts (artifacts ending in `_generic`)
-3. Scans for fat binaries (shared libraries with embedded GPU code)
-4. Unbundles GPU kernels using `clang-offload-bundler`
-5. Creates `.kpack` archive files per architecture
-6. Strips GPU code from shared libraries (PROGBITS → NOBITS)
-7. Adds `.rocm_kpack_ref` marker pointing to `.kpack` files
-8. For databases (rocBLAS, hipBLASLt): separates by architecture
-9. Creates **generic artifact** (host code + markers, NO .kpack files)
-10. Creates **arch-specific artifacts** (ONLY GPU kernels + databases, NO host libraries)
+1. Skips generic artifacts (artifacts ending in `_generic`)
+1. Scans for fat binaries (shared libraries with embedded GPU code)
+1. Unbundles GPU kernels using `clang-offload-bundler`
+1. Creates `.kpack` archive files per architecture
+1. Strips GPU code from shared libraries (PROGBITS → NOBITS)
+1. Adds `.rocm_kpack_ref` marker pointing to `.kpack` files
+1. For databases (rocBLAS, hipBLASLt): separates by architecture
+1. Creates **generic artifact** (host code + markers, NO .kpack files)
+1. Creates **arch-specific artifacts** (ONLY GPU kernels + databases, NO host libraries)
 
 **Output Structure:**
+
 ```
 /develop/tmp/split-artifacts/
 ├── gfx110X-build/
@@ -254,10 +259,11 @@ python python/rocm_kpack/tools/verify_artifacts.py \
 ```
 
 **Verification Checks:**
+
 1. ✓ All artifact manifests present and valid
-2. ✓ Fat binaries converted (PROGBITS → NOBITS)
-3. ✓ Architecture separation (no cross-contamination)
-4. ✓ Kpack archives valid (KPAK magic, MessagePack TOC)
+1. ✓ Fat binaries converted (PROGBITS → NOBITS)
+1. ✓ Architecture separation (no cross-contamination)
+1. ✓ Kpack archives valid (KPAK magic, MessagePack TOC)
 
 ## Step 6: Recombine into Package Groups
 
@@ -274,12 +280,15 @@ python python/rocm_kpack/tools/recombine_artifacts.py \
 **What Recombine Does:**
 
 For each component and each architecture group:
+
 1. Creates **generic artifact** (once per component):
+
    - Copies generic artifact from primary shard
    - Contains host shared libraries with `.rocm_kpack_ref` markers
    - NO .kpack files or architecture-specific databases
 
-2. Creates **arch-specific artifacts** (one per architecture group):
+1. Creates **arch-specific artifacts** (one per architecture group):
+
    - Collects arch-specific artifacts from all shards
    - Copies `.kpack` files for all architectures in the group
    - Copies architecture-specific database files
@@ -287,6 +296,7 @@ For each component and each architecture group:
    - NO host shared libraries
 
 **Output:**
+
 ```
 /develop/tmp/recombined-artifacts/
 ├── blas_lib_generic/      # Host code only (shared across all architectures)
@@ -301,6 +311,7 @@ For each component and each architecture group:
 ```
 
 Each final package deployment requires:
+
 - ONE generic artifact (e.g., `blas_lib_generic`)
 - ONE arch-specific artifact for the target GPU (e.g., `blas_lib_gfx110X`)
 
@@ -384,6 +395,7 @@ find /develop/tmp/recombined-artifacts/blas_lib_gfx110X -name "*.so*" | grep -v 
 **Error**: `Could not find tool 'clang-offload-bundler' on system path`
 
 **Solution**: Specify path explicitly with `--clang-offload-bundler` flag:
+
 ```bash
 find ~/rocm -name "clang-offload-bundler" 2>/dev/null
 # Use the path in your split command
@@ -394,6 +406,7 @@ find ~/rocm -name "clang-offload-bundler" 2>/dev/null
 **Error**: `No space left on device`
 
 **Solution**: The workflow requires ~3x input artifact size:
+
 - Input artifacts: 38 GB
 - Split artifacts: ~40 GB
 - Recombined artifacts: ~30 GB
@@ -406,6 +419,7 @@ Use `/develop/tmp` for temporary files (not `/tmp`) per CLAUDE.md instructions.
 **Warning**: `Binary was not stripped or grew in size: /path/to/binary`
 
 **Explanation**: Some test binaries or specific libraries may not shrink after stripping device code. This is usually harmless and doesn't affect functionality. The warning appears when:
+
 - Binary is already host-only (no device code to strip)
 - Binary has very small or zero-size .hip_fatbin section
 - Binary structure makes it difficult to remove sections efficiently
@@ -415,9 +429,10 @@ This doesn't indicate a failure - the process still completes successfully.
 ## Next Steps
 
 After recombination, these artifacts are ready for:
+
 1. **Package creation** - Create .deb/.rpm packages from recombined artifacts
-2. **Distribution** - Upload to package repositories
-3. **Installation testing** - Verify packages install and work on target GPUs
+1. **Distribution** - Upload to package repositories
+1. **Installation testing** - Verify packages install and work on target GPUs
 
 ## Reference
 
@@ -427,7 +442,9 @@ After recombination, these artifacts are ready for:
 ## Appendix: File Formats
 
 ### artifact_manifest.txt
+
 Plain text file listing installation prefixes (one per line):
+
 ```
 math-libs/BLAS/rocBLAS/stage
 math-libs/BLAS/hipBLASLt/stage
@@ -435,13 +452,17 @@ kpack/stage
 ```
 
 ### .kpack (Kernel Pack Archive)
+
 Binary archive format containing GPU kernels:
+
 - Magic: `KPAK` (0x4b50414b)
 - TOC: MessagePack table of contents
 - Kernels: Compressed (zstd) or uncompressed code objects
 
 ### .kpm (Kernel Pack Manifest)
+
 MessagePack format listing available kpack files:
+
 ```python
 {
   'format_version': 1,
@@ -459,7 +480,9 @@ MessagePack format listing available kpack files:
 ```
 
 ### .rocm_kpack_ref (Kpack Reference Marker)
+
 Plain text format pointing to kpack search paths:
+
 ```
 ../../../.kpack:../../.kpack:.kpack
 ```

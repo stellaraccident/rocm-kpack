@@ -17,6 +17,7 @@ PAGE_SIZE = 0x1000  # 4KB pages
 
 class Elf64_Ehdr(NamedTuple):
     """ELF64 file header (minimal fields we need)"""
+
     e_phoff: int
     e_shoff: int
     e_phnum: int
@@ -26,6 +27,7 @@ class Elf64_Ehdr(NamedTuple):
 
 class Elf64_Phdr(NamedTuple):
     """ELF64 program header"""
+
     p_type: int
     p_flags: int
     p_offset: int
@@ -38,6 +40,7 @@ class Elf64_Phdr(NamedTuple):
 
 class Elf64_Shdr(NamedTuple):
     """ELF64 section header"""
+
     sh_name: int
     sh_type: int
     sh_flags: int
@@ -54,7 +57,7 @@ class Elf64_Shdr(NamedTuple):
 PT_LOAD = 1
 PT_NOTE = 4
 PT_PHDR = 6
-PT_GNU_STACK = 0x6474e551
+PT_GNU_STACK = 0x6474E551
 SHT_NOBITS = 8
 SHT_RELA = 4
 SHT_REL = 9
@@ -66,54 +69,73 @@ R_X86_64_RELATIVE = 8
 
 def read_elf_header(data: bytes) -> Elf64_Ehdr:
     """Read minimal ELF header fields."""
-    if data[:4] != b'\x7fELF':
+    if data[:4] != b"\x7fELF":
         raise ValueError("Not an ELF file")
 
-    e_phoff = struct.unpack_from('<Q', data, 32)[0]
-    e_shoff = struct.unpack_from('<Q', data, 40)[0]
-    e_phnum = struct.unpack_from('<H', data, 56)[0]
-    e_shnum = struct.unpack_from('<H', data, 60)[0]
-    e_shstrndx = struct.unpack_from('<H', data, 62)[0]
+    e_phoff = struct.unpack_from("<Q", data, 32)[0]
+    e_shoff = struct.unpack_from("<Q", data, 40)[0]
+    e_phnum = struct.unpack_from("<H", data, 56)[0]
+    e_shnum = struct.unpack_from("<H", data, 60)[0]
+    e_shstrndx = struct.unpack_from("<H", data, 62)[0]
 
     return Elf64_Ehdr(e_phoff, e_shoff, e_phnum, e_shnum, e_shstrndx)
 
 
 def read_program_header(data: bytes, offset: int) -> Elf64_Phdr:
     """Read a program header."""
-    values = struct.unpack_from('<IIQQQQQQ', data, offset)
+    values = struct.unpack_from("<IIQQQQQQ", data, offset)
     return Elf64_Phdr(*values)
 
 
 def write_program_header(data: bytearray, offset: int, phdr: Elf64_Phdr):
     """Write a program header."""
-    struct.pack_into('<IIQQQQQQ', data, offset,
-                     phdr.p_type, phdr.p_flags, phdr.p_offset,
-                     phdr.p_vaddr, phdr.p_paddr, phdr.p_filesz,
-                     phdr.p_memsz, phdr.p_align)
+    struct.pack_into(
+        "<IIQQQQQQ",
+        data,
+        offset,
+        phdr.p_type,
+        phdr.p_flags,
+        phdr.p_offset,
+        phdr.p_vaddr,
+        phdr.p_paddr,
+        phdr.p_filesz,
+        phdr.p_memsz,
+        phdr.p_align,
+    )
 
 
 def read_section_header(data: bytes, offset: int) -> Elf64_Shdr:
     """Read a section header."""
-    values = struct.unpack_from('<IIQQQQIIQQ', data, offset)
+    values = struct.unpack_from("<IIQQQQIIQQ", data, offset)
     return Elf64_Shdr(*values)
 
 
 def write_section_header(data: bytearray, offset: int, shdr: Elf64_Shdr):
     """Write a section header."""
-    struct.pack_into('<IIQQQQIIQQ', data, offset,
-                     shdr.sh_name, shdr.sh_type, shdr.sh_flags,
-                     shdr.sh_addr, shdr.sh_offset, shdr.sh_size,
-                     shdr.sh_link, shdr.sh_info, shdr.sh_addralign,
-                     shdr.sh_entsize)
+    struct.pack_into(
+        "<IIQQQQIIQQ",
+        data,
+        offset,
+        shdr.sh_name,
+        shdr.sh_type,
+        shdr.sh_flags,
+        shdr.sh_addr,
+        shdr.sh_offset,
+        shdr.sh_size,
+        shdr.sh_link,
+        shdr.sh_info,
+        shdr.sh_addralign,
+        shdr.sh_entsize,
+    )
 
 
 def get_section_name(data: bytes, shstrtab_offset: int, name_idx: int) -> str:
     """Get section name from string table."""
     name_offset = shstrtab_offset + name_idx
-    end = data.find(b'\x00', name_offset)
+    end = data.find(b"\x00", name_offset)
     if end == -1:
         return ""
-    return data[name_offset:end].decode('ascii', errors='ignore')
+    return data[name_offset:end].decode("ascii", errors="ignore")
 
 
 def round_up_to_page(addr: int) -> int:
@@ -163,7 +185,7 @@ def is_pie_or_shared_library(data: bytes) -> bool:
     """
     # e_type is at offset 16, 2 bytes (in ELF64 header)
     ET_DYN = 3  # Shared object file (PIE or .so)
-    e_type = struct.unpack_from('<H', data, 16)[0]
+    e_type = struct.unpack_from("<H", data, 16)[0]
     return e_type == ET_DYN
 
 
@@ -188,7 +210,7 @@ def resize_phdr_table(
     new_phdrs: List[Elf64_Phdr],
     min_content_offset: int,
     phdr_spare_slots: int = 16,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> Tuple[bytearray, int]:
     """
     Resize program header table to accommodate new_phdrs.
@@ -220,7 +242,7 @@ def resize_phdr_table(
         for i, phdr in enumerate(new_phdrs):
             write_program_header(data, ehdr.e_phoff + i * 56, phdr)
 
-        struct.pack_into('<H', data, 56, len(new_phdrs))
+        struct.pack_into("<H", data, 56, len(new_phdrs))
         return (data, ehdr.e_phoff)
 
     # Check if already relocated with spare capacity
@@ -235,7 +257,7 @@ def resize_phdr_table(
         for i, phdr in enumerate(new_phdrs):
             write_program_header(data, ehdr.e_phoff + i * 56, phdr)
 
-        struct.pack_into('<H', data, 56, len(new_phdrs))
+        struct.pack_into("<H", data, 56, len(new_phdrs))
         return (data, ehdr.e_phoff)
 
     # Need to relocate with over-allocation
@@ -243,7 +265,9 @@ def resize_phdr_table(
 
     if verbose:
         print(f"  Relocating program headers to end of file:")
-        print(f"    Need {new_phdr_size} bytes, have {available_space} bytes at 0x{ehdr.e_phoff:x}")
+        print(
+            f"    Need {new_phdr_size} bytes, have {available_space} bytes at 0x{ehdr.e_phoff:x}"
+        )
         print(f"    New offset: 0x{new_phoff:x}")
 
     # Find max vaddr for placing relocated headers
@@ -260,32 +284,48 @@ def resize_phdr_table(
 
     if offset_remainder != vaddr_remainder:
         padding = (vaddr_remainder - offset_remainder + PAGE_SIZE) % PAGE_SIZE
-        data.extend(b'\x00' * padding)
+        data.extend(b"\x00" * padding)
         new_phoff = len(data)
         if verbose:
             print(f"    Added {padding} bytes padding for mmap alignment")
 
     # Calculate capacity with over-allocation
     final_phdr_count = len(new_phdrs) + 1  # +1 for PT_LOAD covering PHDR
-    phdr_capacity = ((final_phdr_count + phdr_spare_slots - 1) // phdr_spare_slots) * phdr_spare_slots
+    phdr_capacity = (
+        (final_phdr_count + phdr_spare_slots - 1) // phdr_spare_slots
+    ) * phdr_spare_slots
     phdr_allocated_size = phdr_capacity * 56
 
     if verbose:
-        print(f"    Allocating {phdr_capacity} PHDR slots ({phdr_capacity - final_phdr_count} spare)")
+        print(
+            f"    Allocating {phdr_capacity} PHDR slots ({phdr_capacity - final_phdr_count} spare)"
+        )
 
     # Update PT_PHDR if present
     for i, phdr in enumerate(new_phdrs):
         if phdr.p_type == PT_PHDR:
             new_phdrs[i] = Elf64_Phdr(
-                PT_PHDR, phdr.p_flags, new_phoff, phdr_vaddr, phdr_vaddr,
-                phdr_allocated_size, phdr_allocated_size, phdr.p_align
+                PT_PHDR,
+                phdr.p_flags,
+                new_phoff,
+                phdr_vaddr,
+                phdr_vaddr,
+                phdr_allocated_size,
+                phdr_allocated_size,
+                phdr.p_align,
             )
             break
 
     # Add PT_LOAD for relocated PHDR
     phdr_load = Elf64_Phdr(
-        PT_LOAD, 4, new_phoff, phdr_vaddr, phdr_vaddr,
-        phdr_allocated_size, phdr_allocated_size, PAGE_SIZE
+        PT_LOAD,
+        4,
+        new_phoff,
+        phdr_vaddr,
+        phdr_vaddr,
+        phdr_allocated_size,
+        phdr_allocated_size,
+        PAGE_SIZE,
     )
     new_phdrs.append(phdr_load)
 
@@ -293,25 +333,40 @@ def resize_phdr_table(
     for i, phdr in enumerate(new_phdrs):
         if phdr.p_type == PT_PHDR:
             new_phdrs[i] = Elf64_Phdr(
-                PT_PHDR, phdr.p_flags, new_phoff, phdr_vaddr, phdr_vaddr,
-                phdr_allocated_size, phdr_allocated_size, phdr.p_align
+                PT_PHDR,
+                phdr.p_flags,
+                new_phoff,
+                phdr_vaddr,
+                phdr_vaddr,
+                phdr_allocated_size,
+                phdr_allocated_size,
+                phdr.p_align,
             )
             break
 
     # Write all headers + zero padding
     for phdr in new_phdrs:
-        data.extend(struct.pack('<IIQQQQQQ',
-            phdr.p_type, phdr.p_flags, phdr.p_offset,
-            phdr.p_vaddr, phdr.p_paddr, phdr.p_filesz,
-            phdr.p_memsz, phdr.p_align))
+        data.extend(
+            struct.pack(
+                "<IIQQQQQQ",
+                phdr.p_type,
+                phdr.p_flags,
+                phdr.p_offset,
+                phdr.p_vaddr,
+                phdr.p_paddr,
+                phdr.p_filesz,
+                phdr.p_memsz,
+                phdr.p_align,
+            )
+        )
 
     # Zero-pad unused slots
     unused_slots = phdr_capacity - len(new_phdrs)
-    data.extend(b'\x00' * (unused_slots * 56))
+    data.extend(b"\x00" * (unused_slots * 56))
 
     # Update ELF header
-    struct.pack_into('<Q', data, 32, new_phoff)
-    struct.pack_into('<H', data, 56, len(new_phdrs))
+    struct.pack_into("<Q", data, 32, new_phoff)
+    struct.pack_into("<H", data, 56, len(new_phdrs))
 
     return (data, new_phoff)
 
@@ -322,7 +377,7 @@ def conservative_zero_page(
     section_name: str = ".hip_fatbin",
     verbose: bool = True,
     force_overflow: bool = False,
-    phdr_spare_slots: int = 16
+    phdr_spare_slots: int = 16,
 ) -> bool:
     """
     Apply conservative zero-page optimization to a section.
@@ -387,10 +442,14 @@ def conservative_zero_page(
     )
 
     if aligned_size == 0:
-        print("\nWARNING: Section too small or misaligned - no full pages to zero",
-              file=sys.stderr)
-        print(f"  Section range: [0x{section_vaddr:x}, 0x{section_vaddr + section_size:x})",
-              file=sys.stderr)
+        print(
+            "\nWARNING: Section too small or misaligned - no full pages to zero",
+            file=sys.stderr,
+        )
+        print(
+            f"  Section range: [0x{section_vaddr:x}, 0x{section_vaddr + section_size:x})",
+            file=sys.stderr,
+        )
         return False
 
     aligned_offset = section_offset + (aligned_vaddr - section_vaddr)
@@ -419,8 +478,7 @@ def conservative_zero_page(
     for i in range(ehdr.e_phnum):
         phdr = read_program_header(data, ehdr.e_phoff + i * 56)
         if phdr.p_type == PT_LOAD:
-            if (phdr.p_vaddr <= section_vaddr <
-                phdr.p_vaddr + phdr.p_memsz):
+            if phdr.p_vaddr <= section_vaddr < phdr.p_vaddr + phdr.p_memsz:
                 target_load_idx = i
                 target_load = phdr
                 break
@@ -435,7 +493,7 @@ def conservative_zero_page(
 
     # Remove the aligned bytes from file
     new_data = bytearray(data[:aligned_offset])
-    new_data.extend(data[aligned_offset + aligned_size:])
+    new_data.extend(data[aligned_offset + aligned_size :])
 
     if verbose:
         print(f"\nRemoving aligned region from file:")
@@ -462,7 +520,7 @@ def conservative_zero_page(
             p_paddr=vaddr,
             p_filesz=fsize,
             p_memsz=vsize,
-            p_align=target_load.p_align
+            p_align=target_load.p_align,
         )
 
     # Calculate all the pieces
@@ -473,10 +531,14 @@ def conservative_zero_page(
             # Not the target load - adjust offset if after removed bytes
             if phdr.p_offset > aligned_offset:
                 phdr = Elf64_Phdr(
-                    phdr.p_type, phdr.p_flags,
+                    phdr.p_type,
+                    phdr.p_flags,
                     phdr.p_offset - aligned_size,
-                    phdr.p_vaddr, phdr.p_paddr,
-                    phdr.p_filesz, phdr.p_memsz, phdr.p_align
+                    phdr.p_vaddr,
+                    phdr.p_paddr,
+                    phdr.p_filesz,
+                    phdr.p_memsz,
+                    phdr.p_align,
                 )
             new_phdrs.append(phdr)
         else:
@@ -485,35 +547,40 @@ def conservative_zero_page(
             if target_load.p_vaddr < section_vaddr:
                 pre_vsize = section_vaddr - target_load.p_vaddr
                 pre_fsize = min(pre_vsize, target_load.p_filesz)
-                new_phdrs.append(make_load(
-                    target_load.p_vaddr, pre_vsize,
-                    target_load.p_offset, pre_fsize
-                ))
+                new_phdrs.append(
+                    make_load(
+                        target_load.p_vaddr, pre_vsize, target_load.p_offset, pre_fsize
+                    )
+                )
 
             # Piece 2: Section prefix (if unaligned start)
             if section_vaddr < aligned_vaddr:
                 prefix_vsize = aligned_vaddr - section_vaddr
                 prefix_fsize = prefix_vsize
-                new_phdrs.append(make_load(
-                    section_vaddr, prefix_vsize,
-                    section_offset, prefix_fsize
-                ))
+                new_phdrs.append(
+                    make_load(section_vaddr, prefix_vsize, section_offset, prefix_fsize)
+                )
 
             # Piece 3: Aligned region (zero-page)
-            new_phdrs.append(make_load(
-                aligned_vaddr, aligned_size,
-                aligned_offset, 0  # p_filesz=0 for zero-page
-            ))
+            new_phdrs.append(
+                make_load(
+                    aligned_vaddr,
+                    aligned_size,
+                    aligned_offset,
+                    0,  # p_filesz=0 for zero-page
+                )
+            )
 
             # Piece 4: Section suffix (if unaligned end)
             if aligned_end_vaddr < section_end_vaddr:
                 suffix_vsize = section_end_vaddr - aligned_end_vaddr
                 suffix_fsize = suffix_vsize
                 # File offset is now at aligned_offset (shifted down)
-                new_phdrs.append(make_load(
-                    aligned_end_vaddr, suffix_vsize,
-                    aligned_offset, suffix_fsize
-                ))
+                new_phdrs.append(
+                    make_load(
+                        aligned_end_vaddr, suffix_vsize, aligned_offset, suffix_fsize
+                    )
+                )
 
             # Piece 5: After section (if any)
             target_load_end = target_load.p_vaddr + target_load.p_memsz
@@ -523,12 +590,13 @@ def conservative_zero_page(
                 # Calculate file offset and size for post-section content
                 section_file_end = section_offset + section_size
                 post_file_offset = section_file_end - aligned_size  # Shifted down
-                post_fsize = (target_load.p_offset + target_load.p_filesz) - section_file_end
+                post_fsize = (
+                    target_load.p_offset + target_load.p_filesz
+                ) - section_file_end
                 if post_fsize > 0:
-                    new_phdrs.append(make_load(
-                        post_vaddr, post_vsize,
-                        post_file_offset, post_fsize
-                    ))
+                    new_phdrs.append(
+                        make_load(post_vaddr, post_vsize, post_file_offset, post_fsize)
+                    )
 
     if verbose:
         print(f"\nProgram headers: {ehdr.e_phnum} -> {len(new_phdrs)}")
@@ -542,7 +610,11 @@ def conservative_zero_page(
         shdr = read_section_header(data, ehdr.e_shoff + i * 64)
         if shdr.sh_offset > ehdr.e_phoff + old_phdr_size:
             # Adjust offset for removed bytes
-            adjusted_offset = shdr.sh_offset - aligned_size if shdr.sh_offset > aligned_offset else shdr.sh_offset
+            adjusted_offset = (
+                shdr.sh_offset - aligned_size
+                if shdr.sh_offset > aligned_offset
+                else shdr.sh_offset
+            )
             min_content_offset = min(min_content_offset, adjusted_offset)
 
     # Also check program headers for data they reference (e.g., PT_INTERP)
@@ -550,7 +622,11 @@ def conservative_zero_page(
         phdr = read_program_header(data, ehdr.e_phoff + i * 56)
         if phdr.p_offset > ehdr.e_phoff + old_phdr_size and phdr.p_filesz > 0:
             # Adjust offset for removed bytes
-            adjusted_offset = phdr.p_offset - aligned_size if phdr.p_offset > aligned_offset else phdr.p_offset
+            adjusted_offset = (
+                phdr.p_offset - aligned_size
+                if phdr.p_offset > aligned_offset
+                else phdr.p_offset
+            )
             min_content_offset = min(min_content_offset, adjusted_offset)
 
     # Resize PHDR table (handles overflow, spare capacity, etc.)
@@ -564,9 +640,12 @@ def conservative_zero_page(
             print(f"  [TEST MODE] Forcing overflow by adding dummy header")
 
     new_data, new_phoff = resize_phdr_table(
-        new_data, ehdr, new_phdrs, min_content_offset,
+        new_data,
+        ehdr,
+        new_phdrs,
+        min_content_offset,
         phdr_spare_slots=phdr_spare_slots,
-        verbose=verbose
+        verbose=verbose,
     )
 
     if force_overflow:
@@ -577,16 +656,27 @@ def conservative_zero_page(
             # Rewrite headers without dummy
             write_offset = new_phoff
             for phdr in new_phdrs:
-                struct.pack_into('<IIQQQQQQ', new_data, write_offset,
-                    phdr.p_type, phdr.p_flags, phdr.p_offset,
-                    phdr.p_vaddr, phdr.p_paddr, phdr.p_filesz,
-                    phdr.p_memsz, phdr.p_align)
+                struct.pack_into(
+                    "<IIQQQQQQ",
+                    new_data,
+                    write_offset,
+                    phdr.p_type,
+                    phdr.p_flags,
+                    phdr.p_offset,
+                    phdr.p_vaddr,
+                    phdr.p_paddr,
+                    phdr.p_filesz,
+                    phdr.p_memsz,
+                    phdr.p_align,
+                )
                 write_offset += 56
-            struct.pack_into('<H', new_data, 56, len(new_phdrs))
+            struct.pack_into("<H", new_data, 56, len(new_phdrs))
 
     # Update section header table offset
-    new_shoff = ehdr.e_shoff - aligned_size if ehdr.e_shoff > aligned_offset else ehdr.e_shoff
-    struct.pack_into('<Q', new_data, 40, new_shoff)
+    new_shoff = (
+        ehdr.e_shoff - aligned_size if ehdr.e_shoff > aligned_offset else ehdr.e_shoff
+    )
+    struct.pack_into("<Q", new_data, 40, new_shoff)
 
     # Update section headers
     for i in range(ehdr.e_shnum):
@@ -595,16 +685,30 @@ def conservative_zero_page(
         if i == target_section_idx:
             # Mark as NOBITS
             shdr = Elf64_Shdr(
-                shdr.sh_name, SHT_NOBITS, shdr.sh_flags,
-                shdr.sh_addr, section_offset, shdr.sh_size,
-                shdr.sh_link, shdr.sh_info, shdr.sh_addralign, shdr.sh_entsize
+                shdr.sh_name,
+                SHT_NOBITS,
+                shdr.sh_flags,
+                shdr.sh_addr,
+                section_offset,
+                shdr.sh_size,
+                shdr.sh_link,
+                shdr.sh_info,
+                shdr.sh_addralign,
+                shdr.sh_entsize,
             )
         elif shdr.sh_offset > aligned_offset:
             # Adjust offset
             shdr = Elf64_Shdr(
-                shdr.sh_name, shdr.sh_type, shdr.sh_flags,
-                shdr.sh_addr, shdr.sh_offset - aligned_size, shdr.sh_size,
-                shdr.sh_link, shdr.sh_info, shdr.sh_addralign, shdr.sh_entsize
+                shdr.sh_name,
+                shdr.sh_type,
+                shdr.sh_flags,
+                shdr.sh_addr,
+                shdr.sh_offset - aligned_size,
+                shdr.sh_size,
+                shdr.sh_link,
+                shdr.sh_info,
+                shdr.sh_addralign,
+                shdr.sh_entsize,
             )
 
         write_section_header(new_data, new_shoff + i * 64, shdr)
@@ -620,9 +724,9 @@ def conservative_zero_page(
     return True
 
 
-
 class Elf64_Rela(NamedTuple):
     """ELF64 relocation with explicit addend"""
+
     r_offset: int
     r_info: int
     r_addend: int
@@ -630,28 +734,31 @@ class Elf64_Rela(NamedTuple):
 
 class Elf64_Rel(NamedTuple):
     """ELF64 relocation with implicit addend"""
+
     r_offset: int
     r_info: int
 
 
 def read_rela_entry(data: bytes, offset: int) -> Elf64_Rela:
     """Read a RELA relocation entry."""
-    r_offset, r_info, r_addend = struct.unpack_from('<QQq', data, offset)
+    r_offset, r_info, r_addend = struct.unpack_from("<QQq", data, offset)
     return Elf64_Rela(r_offset, r_info, r_addend)
 
 
 def write_rela_entry(data: bytearray, offset: int, rela: Elf64_Rela):
     """Write a RELA relocation entry."""
-    struct.pack_into('<QQq', data, offset, rela.r_offset, rela.r_info, rela.r_addend)
+    struct.pack_into("<QQq", data, offset, rela.r_offset, rela.r_info, rela.r_addend)
 
 
 def read_rel_entry(data: bytes, offset: int) -> Elf64_Rel:
     """Read a REL relocation entry."""
-    r_offset, r_info = struct.unpack_from('<QQ', data, offset)
+    r_offset, r_info = struct.unpack_from("<QQ", data, offset)
     return Elf64_Rel(r_offset, r_info)
 
 
-def find_section_by_name(data: bytes, ehdr: Elf64_Ehdr, name: str) -> Optional[Tuple[int, Elf64_Shdr]]:
+def find_section_by_name(
+    data: bytes, ehdr: Elf64_Ehdr, name: str
+) -> Optional[Tuple[int, Elf64_Shdr]]:
     """Find a section by name. Returns (index, section_header) or None."""
     shstrtab_shdr = read_section_header(data, ehdr.e_shoff + ehdr.e_shstrndx * 64)
     shstrtab_offset = shstrtab_shdr.sh_offset
@@ -681,7 +788,7 @@ def map_section_to_new_load(
     section_name: str,
     new_vaddr: Optional[int] = None,
     verbose: bool = True,
-    phdr_spare_slots: int = 16
+    phdr_spare_slots: int = 16,
 ) -> Optional[int]:
     """
     Map a section to a new PT_LOAD segment at a specified virtual address.
@@ -722,7 +829,9 @@ def map_section_to_new_load(
 
     if verbose:
         print(f"  Section file offset: 0x{section_shdr.sh_offset:x}")
-        print(f"  Section size: 0x{section_shdr.sh_size:x} ({section_shdr.sh_size} bytes)")
+        print(
+            f"  Section size: 0x{section_shdr.sh_size:x} ({section_shdr.sh_size} bytes)"
+        )
 
     # Read all existing program headers
     phdrs = []
@@ -752,18 +861,26 @@ def map_section_to_new_load(
     if offset_remainder != vaddr_remainder:
         # Need to relocate section data to have proper alignment
         # Append to end of file with correct alignment
-        padding_needed = (vaddr_remainder - (len(data) % PAGE_SIZE) + PAGE_SIZE) % PAGE_SIZE
+        padding_needed = (
+            vaddr_remainder - (len(data) % PAGE_SIZE) + PAGE_SIZE
+        ) % PAGE_SIZE
         new_section_offset = len(data) + padding_needed
 
         if verbose:
             print(f"  Realigning section for mmap compatibility:")
-            print(f"    Old offset: 0x{section_file_offset:x} (remainder 0x{offset_remainder:x})")
-            print(f"    New offset: 0x{new_section_offset:x} (remainder 0x{new_section_offset % PAGE_SIZE:x})")
+            print(
+                f"    Old offset: 0x{section_file_offset:x} (remainder 0x{offset_remainder:x})"
+            )
+            print(
+                f"    New offset: 0x{new_section_offset:x} (remainder 0x{new_section_offset % PAGE_SIZE:x})"
+            )
             print(f"    Padding: {padding_needed} bytes")
 
         # Add padding and copy section data to new location
-        data.extend(b'\x00' * padding_needed)
-        section_data = data[section_file_offset:section_file_offset + section_shdr.sh_size]
+        data.extend(b"\x00" * padding_needed)
+        section_data = data[
+            section_file_offset : section_file_offset + section_shdr.sh_size
+        ]
         data.extend(section_data)
 
     # Create new PT_LOAD segment for the section
@@ -775,7 +892,7 @@ def map_section_to_new_load(
         p_paddr=new_vaddr,
         p_filesz=section_shdr.sh_size,
         p_memsz=section_shdr.sh_size,
-        p_align=PAGE_SIZE
+        p_align=PAGE_SIZE,
     )
 
     phdrs.append(new_load)
@@ -804,17 +921,20 @@ def map_section_to_new_load(
 
     # Resize program header table (handles in-place or relocation)
     data, new_phoff = resize_phdr_table(
-        data, ehdr, phdrs, min_content_offset,
+        data,
+        ehdr,
+        phdrs,
+        min_content_offset,
         phdr_spare_slots=phdr_spare_slots,
-        verbose=verbose
+        verbose=verbose,
     )
 
     # Update e_phoff in ELF header if it changed
     if new_phoff != ehdr.e_phoff:
-        struct.pack_into('<Q', data, 32, new_phoff)
+        struct.pack_into("<Q", data, 32, new_phoff)
 
     # Update e_phnum in ELF header
-    struct.pack_into('<H', data, 56, len(phdrs))
+    struct.pack_into("<H", data, 56, len(phdrs))
 
     # Update section header for mapped section
     section_shdr = Elf64_Shdr(
@@ -827,7 +947,7 @@ def map_section_to_new_load(
         section_shdr.sh_link,
         section_shdr.sh_info,
         section_shdr.sh_addralign,
-        section_shdr.sh_entsize
+        section_shdr.sh_entsize,
     )
 
     write_section_header(data, ehdr.e_shoff + section_idx * 64, section_shdr)
@@ -849,7 +969,7 @@ def find_and_update_relocation(
     vaddr: int,
     new_addend: int,
     old_addend: Optional[int] = None,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> bool:
     """
     Find and update R_X86_64_RELATIVE relocation at given virtual address.
@@ -871,7 +991,9 @@ def find_and_update_relocation(
     for i in range(ehdr.e_shnum):
         shdr = read_section_header(data, ehdr.e_shoff + i * 64)
         if shdr.sh_type == SHT_RELA:
-            shstrtab_shdr = read_section_header(data, ehdr.e_shoff + ehdr.e_shstrndx * 64)
+            shstrtab_shdr = read_section_header(
+                data, ehdr.e_shoff + ehdr.e_shstrndx * 64
+            )
             name = get_section_name(data, shstrtab_shdr.sh_offset, shdr.sh_name)
             rela_sections.append((i, shdr, name))
             if verbose:
@@ -897,9 +1019,11 @@ def find_and_update_relocation(
 
                 if reloc_type != R_X86_64_RELATIVE:
                     if verbose:
-                        print(f"  WARNING: Found relocation at 0x{vaddr:x} "
-                              f"but type is {reloc_type}, not R_X86_64_RELATIVE (8)",
-                              file=sys.stderr)
+                        print(
+                            f"  WARNING: Found relocation at 0x{vaddr:x} "
+                            f"but type is {reloc_type}, not R_X86_64_RELATIVE (8)",
+                            file=sys.stderr,
+                        )
                     continue
 
                 if verbose:
@@ -911,8 +1035,11 @@ def find_and_update_relocation(
                 # Validate old addend if specified
                 if old_addend is not None and rela.r_addend != old_addend:
                     if verbose:
-                        print(f"  WARNING: Expected addend 0x{old_addend:x}, "
-                              f"found 0x{rela.r_addend:x}", file=sys.stderr)
+                        print(
+                            f"  WARNING: Expected addend 0x{old_addend:x}, "
+                            f"found 0x{rela.r_addend:x}",
+                            file=sys.stderr,
+                        )
                         print(f"  Updating anyway...", file=sys.stderr)
 
                 # Update addend
@@ -920,7 +1047,9 @@ def find_and_update_relocation(
                 write_rela_entry(data, entry_offset, new_rela)
 
                 if verbose:
-                    print(f"  ✅ Updated addend: 0x{rela.r_addend:x} -> 0x{new_addend:x}")
+                    print(
+                        f"  ✅ Updated addend: 0x{rela.r_addend:x} -> 0x{new_addend:x}"
+                    )
 
                 return True
 
@@ -936,7 +1065,7 @@ def update_relocation(
     relocation_vaddr: int,
     old_addend: int,
     new_addend: int,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> bool:
     """
     Update a R_X86_64_RELATIVE relocation's addend.
@@ -971,13 +1100,19 @@ def update_relocation(
 
     # Use helper to find and update the relocation
     success = find_and_update_relocation(
-        data, ehdr, relocation_vaddr, new_addend,
+        data,
+        ehdr,
+        relocation_vaddr,
+        new_addend,
         old_addend=old_addend if old_addend != 0 else None,
-        verbose=verbose
+        verbose=verbose,
     )
 
     if not success:
-        print(f"ERROR: Relocation not found at vaddr 0x{relocation_vaddr:x}", file=sys.stderr)
+        print(
+            f"ERROR: Relocation not found at vaddr 0x{relocation_vaddr:x}",
+            file=sys.stderr,
+        )
         return False
 
     # Write output
@@ -997,7 +1132,7 @@ def set_pointer(
     pointer_vaddr: int,
     target_vaddr: int,
     update_relocation: bool = True,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> bool:
     """
     Write a pointer value and optionally update its relocation.
@@ -1062,14 +1197,17 @@ def set_pointer(
     file_offset = pointer_load.p_offset + offset_in_segment
 
     if file_offset + 8 > len(data):
-        print(f"ERROR: File offset 0x{file_offset:x} + 8 exceeds file size", file=sys.stderr)
+        print(
+            f"ERROR: File offset 0x{file_offset:x} + 8 exceeds file size",
+            file=sys.stderr,
+        )
         return False
 
     if verbose:
         print(f"  File offset: 0x{file_offset:x}")
 
     # Write the pointer value (8 bytes, little-endian)
-    struct.pack_into('<Q', data, file_offset, target_vaddr)
+    struct.pack_into("<Q", data, file_offset, target_vaddr)
 
     if verbose:
         print(f"  ✅ Wrote pointer value to file")
@@ -1080,9 +1218,12 @@ def set_pointer(
             print(f"  Checking for relocation at 0x{pointer_vaddr:x}...")
 
         reloc_updated = find_and_update_relocation(
-            data, ehdr, pointer_vaddr, target_vaddr,
+            data,
+            ehdr,
+            pointer_vaddr,
+            target_vaddr,
             old_addend=None,  # Don't validate old value
-            verbose=verbose
+            verbose=verbose,
         )
 
         if reloc_updated:
@@ -1091,14 +1232,22 @@ def set_pointer(
         else:
             # PIE/shared libraries REQUIRE relocations for pointers
             if is_pie:
-                print(f"ERROR: Binary is PIE/shared library but no relocation found at 0x{pointer_vaddr:x}",
-                      file=sys.stderr)
-                print(f"  PIE binaries require R_X86_64_RELATIVE relocations for pointers to work correctly",
-                      file=sys.stderr)
-                print(f"  The pointer location must be initialized with a relocatable address (e.g., &symbol)",
-                      file=sys.stderr)
-                print(f"  Constant addresses (like 0x1000) do not generate relocations",
-                      file=sys.stderr)
+                print(
+                    f"ERROR: Binary is PIE/shared library but no relocation found at 0x{pointer_vaddr:x}",
+                    file=sys.stderr,
+                )
+                print(
+                    f"  PIE binaries require R_X86_64_RELATIVE relocations for pointers to work correctly",
+                    file=sys.stderr,
+                )
+                print(
+                    f"  The pointer location must be initialized with a relocatable address (e.g., &symbol)",
+                    file=sys.stderr,
+                )
+                print(
+                    f"  Constant addresses (like 0x1000) do not generate relocations",
+                    file=sys.stderr,
+                )
                 return False
             else:
                 # Non-PIE executables: relocation is optional
@@ -1132,59 +1281,98 @@ def main(argv: List[str]) -> int:
         description="Extended ELF manipulation tool for zero-paging and PT_LOAD mapping"
     )
 
-    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # zero-page command
-    zero_parser = subparsers.add_parser('zero-page', help='Zero-page a section')
+    zero_parser = subparsers.add_parser("zero-page", help="Zero-page a section")
     zero_parser.add_argument("input", type=Path, help="Input ELF binary")
     zero_parser.add_argument("output", type=Path, help="Output ELF binary")
-    zero_parser.add_argument("--section", default=".hip_fatbin",
-                             help="Section name to zero-page")
-    zero_parser.add_argument("--phdr-spare-slots", type=int, default=16,
-                             help="Number of spare PHDR slots to allocate when relocating (default: 16)")
-    zero_parser.add_argument("-q", "--quiet", action="store_true",
-                             help="Suppress output")
+    zero_parser.add_argument(
+        "--section", default=".hip_fatbin", help="Section name to zero-page"
+    )
+    zero_parser.add_argument(
+        "--phdr-spare-slots",
+        type=int,
+        default=16,
+        help="Number of spare PHDR slots to allocate when relocating (default: 16)",
+    )
+    zero_parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress output"
+    )
 
     # map-section command
-    map_parser = subparsers.add_parser('map-section', help='Map section to new PT_LOAD')
+    map_parser = subparsers.add_parser("map-section", help="Map section to new PT_LOAD")
     map_parser.add_argument("input", type=Path, help="Input ELF binary")
     map_parser.add_argument("output", type=Path, help="Output ELF binary")
-    map_parser.add_argument("--section", required=True,
-                           help="Section name to map (e.g., .rocm_kpack_ref)")
-    map_parser.add_argument("--vaddr", type=lambda x: int(x, 0),
-                           help="Virtual address (hex, auto-allocate if not specified)")
-    map_parser.add_argument("--phdr-spare-slots", type=int, default=16,
-                             help="Number of spare PHDR slots to allocate when relocating (default: 16)")
-    map_parser.add_argument("-q", "--quiet", action="store_true",
-                           help="Suppress output")
+    map_parser.add_argument(
+        "--section", required=True, help="Section name to map (e.g., .rocm_kpack_ref)"
+    )
+    map_parser.add_argument(
+        "--vaddr",
+        type=lambda x: int(x, 0),
+        help="Virtual address (hex, auto-allocate if not specified)",
+    )
+    map_parser.add_argument(
+        "--phdr-spare-slots",
+        type=int,
+        default=16,
+        help="Number of spare PHDR slots to allocate when relocating (default: 16)",
+    )
+    map_parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress output"
+    )
 
     # update-relocation command
-    reloc_parser = subparsers.add_parser('update-relocation',
-                                         help='Update a relocation addend')
+    reloc_parser = subparsers.add_parser(
+        "update-relocation", help="Update a relocation addend"
+    )
     reloc_parser.add_argument("input", type=Path, help="Input ELF binary")
     reloc_parser.add_argument("output", type=Path, help="Output ELF binary")
-    reloc_parser.add_argument("--vaddr", required=True, type=lambda x: int(x, 0),
-                             help="Virtual address of relocation")
-    reloc_parser.add_argument("--old-addend", type=lambda x: int(x, 0), default=0,
-                             help="Expected old addend (for validation)")
-    reloc_parser.add_argument("--new-addend", required=True, type=lambda x: int(x, 0),
-                             help="New addend value")
-    reloc_parser.add_argument("-q", "--quiet", action="store_true",
-                             help="Suppress output")
+    reloc_parser.add_argument(
+        "--vaddr",
+        required=True,
+        type=lambda x: int(x, 0),
+        help="Virtual address of relocation",
+    )
+    reloc_parser.add_argument(
+        "--old-addend",
+        type=lambda x: int(x, 0),
+        default=0,
+        help="Expected old addend (for validation)",
+    )
+    reloc_parser.add_argument(
+        "--new-addend", required=True, type=lambda x: int(x, 0), help="New addend value"
+    )
+    reloc_parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress output"
+    )
 
     # set-pointer command
-    pointer_parser = subparsers.add_parser('set-pointer',
-                                           help='Write pointer value and update relocation')
+    pointer_parser = subparsers.add_parser(
+        "set-pointer", help="Write pointer value and update relocation"
+    )
     pointer_parser.add_argument("input", type=Path, help="Input ELF binary")
     pointer_parser.add_argument("output", type=Path, help="Output ELF binary")
-    pointer_parser.add_argument("--at", required=True, type=lambda x: int(x, 0),
-                                help="Virtual address of pointer location")
-    pointer_parser.add_argument("--target", required=True, type=lambda x: int(x, 0),
-                                help="Virtual address to point to")
-    pointer_parser.add_argument("--no-relocation", action="store_true",
-                                help="Skip relocation update (direct write only)")
-    pointer_parser.add_argument("-q", "--quiet", action="store_true",
-                                help="Suppress output")
+    pointer_parser.add_argument(
+        "--at",
+        required=True,
+        type=lambda x: int(x, 0),
+        help="Virtual address of pointer location",
+    )
+    pointer_parser.add_argument(
+        "--target",
+        required=True,
+        type=lambda x: int(x, 0),
+        help="Virtual address to point to",
+    )
+    pointer_parser.add_argument(
+        "--no-relocation",
+        action="store_true",
+        help="Skip relocation update (direct write only)",
+    )
+    pointer_parser.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress output"
+    )
 
     args = parser.parse_args(argv)
 
@@ -1198,37 +1386,41 @@ def main(argv: List[str]) -> int:
 
     success = False
 
-    if args.command == 'zero-page':
+    if args.command == "zero-page":
         success = conservative_zero_page(
-            args.input, args.output,
+            args.input,
+            args.output,
             section_name=args.section,
             verbose=not args.quiet,
-            phdr_spare_slots=args.phdr_spare_slots
+            phdr_spare_slots=args.phdr_spare_slots,
         )
-    elif args.command == 'map-section':
+    elif args.command == "map-section":
         result = map_section_to_new_load(
-            args.input, args.output,
+            args.input,
+            args.output,
             section_name=args.section,
             new_vaddr=args.vaddr,
             verbose=not args.quiet,
-            phdr_spare_slots=args.phdr_spare_slots
+            phdr_spare_slots=args.phdr_spare_slots,
         )
         success = result is not None
-    elif args.command == 'update-relocation':
+    elif args.command == "update-relocation":
         success = update_relocation(
-            args.input, args.output,
+            args.input,
+            args.output,
             relocation_vaddr=args.vaddr,
             old_addend=args.old_addend,
             new_addend=args.new_addend,
-            verbose=not args.quiet
+            verbose=not args.quiet,
         )
-    elif args.command == 'set-pointer':
+    elif args.command == "set-pointer":
         success = set_pointer(
-            args.input, args.output,
+            args.input,
+            args.output,
             pointer_vaddr=args.at,
             target_vaddr=args.target,
             update_relocation=not args.no_relocation,
-            verbose=not args.quiet
+            verbose=not args.quiet,
         )
 
     return 0 if success else 1

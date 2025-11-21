@@ -35,6 +35,7 @@ class CollectedArtifact:
 
 class ArtifactNameInfo(NamedTuple):
     """Parsed artifact directory name."""
+
     component_name: str
     architecture: str | None  # None for generic artifacts
 
@@ -42,6 +43,7 @@ class ArtifactNameInfo(NamedTuple):
 @dataclass
 class AvailabilityResult:
     """Result of architecture availability check."""
+
     available: list[str]
     missing: list[str]
 
@@ -85,7 +87,9 @@ class ArtifactCollector:
             ValueError: If artifact structure is invalid or primary shard missing
         """
         if not self.shards_dir.exists():
-            raise FileNotFoundError(f"Shards directory does not exist: {self.shards_dir}")
+            raise FileNotFoundError(
+                f"Shards directory does not exist: {self.shards_dir}"
+            )
 
         if not self.shards_dir.is_dir():
             raise ValueError(f"Shards path is not a directory: {self.shards_dir}")
@@ -126,9 +130,15 @@ class ArtifactCollector:
 
         if self.verbose:
             print(f"\nCollection summary:")
-            print(f"  Generic artifacts (from {self.primary_shard}): {len(self.generic_artifacts)}")
-            total_arch_artifacts = sum(len(archs) for archs in self.arch_artifacts.values())
-            print(f"  Architecture-specific artifacts (all shards): {total_arch_artifacts}")
+            print(
+                f"  Generic artifacts (from {self.primary_shard}): {len(self.generic_artifacts)}"
+            )
+            total_arch_artifacts = sum(
+                len(archs) for archs in self.arch_artifacts.values()
+            )
+            print(
+                f"  Architecture-specific artifacts (all shards): {total_arch_artifacts}"
+            )
 
     def _scan_shard(self, shard_dir: Path) -> None:
         """
@@ -161,7 +171,9 @@ class ArtifactCollector:
             artifact_info = self._parse_artifact_name(artifact_dir.name)
             if artifact_info is None:
                 if self.verbose:
-                    print(f"  Skipping {artifact_dir.name}: invalid artifact name format")
+                    print(
+                        f"  Skipping {artifact_dir.name}: invalid artifact name format"
+                    )
                 continue
 
             component_name = artifact_info.component_name
@@ -171,9 +183,13 @@ class ArtifactCollector:
             try:
                 prefixes = read_artifact_manifest(artifact_dir)
             except FileNotFoundError as e:
-                raise ValueError(f"Artifact manifest not found in {artifact_dir}") from e
+                raise ValueError(
+                    f"Artifact manifest not found in {artifact_dir}"
+                ) from e
             except OSError as e:
-                raise ValueError(f"Cannot read manifest from {artifact_dir}: {e}") from e
+                raise ValueError(
+                    f"Cannot read manifest from {artifact_dir}: {e}"
+                ) from e
 
             # Create collected artifact
             artifact = CollectedArtifact(
@@ -181,7 +197,7 @@ class ArtifactCollector:
                 shard_name=shard_name,
                 component_name=component_name,
                 architecture=architecture,
-                prefixes=prefixes
+                prefixes=prefixes,
             )
 
             # Store in shard collection
@@ -202,7 +218,9 @@ class ArtifactCollector:
                         print(f"  Found generic artifact: {component_name}")
                 else:
                     if self.verbose:
-                        print(f"  Skipping generic artifact {component_name} (not from primary shard)")
+                        print(
+                            f"  Skipping generic artifact {component_name} (not from primary shard)"
+                        )
             else:
                 # Architecture-specific artifacts: from any shard
                 if component_name not in self.arch_artifacts:
@@ -219,7 +237,9 @@ class ArtifactCollector:
                 else:
                     self.arch_artifacts[component_name][architecture] = artifact
                     if self.verbose:
-                        print(f"  Found arch-specific artifact: {component_name} ({architecture})")
+                        print(
+                            f"  Found arch-specific artifact: {component_name} ({architecture})"
+                        )
 
     def _parse_artifact_name(self, name: str) -> ArtifactNameInfo | None:
         """
@@ -238,7 +258,7 @@ class ArtifactCollector:
         """
         # Check for generic suffix
         if name.endswith("_generic"):
-            component_name = name[:-len("_generic")]
+            component_name = name[: -len("_generic")]
             return ArtifactNameInfo(component_name=component_name, architecture=None)
 
         # Check for architecture suffix (gfxXXXX)
@@ -246,7 +266,9 @@ class ArtifactCollector:
         if len(parts) == 2:
             component_name, potential_arch = parts
             if potential_arch.startswith("gfx"):
-                return ArtifactNameInfo(component_name=component_name, architecture=potential_arch)
+                return ArtifactNameInfo(
+                    component_name=component_name, architecture=potential_arch
+                )
 
         return None
 
@@ -262,7 +284,9 @@ class ArtifactCollector:
         """
         return self.generic_artifacts.get(component_name)
 
-    def get_arch_artifact(self, component_name: str, architecture: str) -> CollectedArtifact | None:
+    def get_arch_artifact(
+        self, component_name: str, architecture: str
+    ) -> CollectedArtifact | None:
         """
         Get architecture-specific artifact for a component (from any shard).
 
@@ -306,7 +330,7 @@ class ArtifactCollector:
         self,
         component_name: str,
         required_architectures: list[str],
-        require_generic: bool = True
+        require_generic: bool = True,
     ) -> AvailabilityResult:
         """
         Validate that required artifacts are available.
@@ -335,5 +359,5 @@ class ArtifactCollector:
 
         return AvailabilityResult(
             available=[arch for arch in required_architectures if arch in available],
-            missing=missing
+            missing=missing,
         )

@@ -71,7 +71,7 @@ class TestArtifactManifest:
         original_prefixes = [
             "math-libs/BLAS/rocBLAS/stage",
             "math-libs/BLAS/hipBLASLt/stage",
-            "kpack/stage"
+            "kpack/stage",
         ]
 
         write_artifact_manifest(tmp_path, original_prefixes)
@@ -189,7 +189,7 @@ class TestIsFatBinary:
         """Test detecting a binary with .hip_fatbin section."""
         # Create a real file with ELF magic bytes
         elf_file = tmp_path / "binary.so"
-        elf_file.write_bytes(b'\x7fELF' + b'\x00' * 100)  # ELF magic + padding
+        elf_file.write_bytes(b"\x7fELF" + b"\x00" * 100)  # ELF magic + padding
 
         mock_toolchain = Mock(spec=Toolchain)
         mock_toolchain.readelf = "/usr/bin/readelf"
@@ -212,7 +212,7 @@ class TestIsFatBinary:
         """Test detecting a regular binary without .hip_fatbin."""
         # Create a real file with ELF magic bytes
         elf_file = tmp_path / "binary.so"
-        elf_file.write_bytes(b'\x7fELF' + b'\x00' * 100)  # ELF magic + padding
+        elf_file.write_bytes(b"\x7fELF" + b"\x00" * 100)  # ELF magic + padding
 
         mock_toolchain = Mock(spec=Toolchain)
         mock_toolchain.readelf = "/usr/bin/readelf"
@@ -246,7 +246,7 @@ class TestIsFatBinary:
         """Test handling when readelf is not available."""
         # Create a real file with ELF magic bytes
         elf_file = tmp_path / "binary.so"
-        elf_file.write_bytes(b'\x7fELF' + b'\x00' * 100)  # ELF magic + padding
+        elf_file.write_bytes(b"\x7fELF" + b"\x00" * 100)  # ELF magic + padding
 
         mock_toolchain = Mock(spec=Toolchain)
         mock_toolchain.readelf = "/nonexistent/readelf"

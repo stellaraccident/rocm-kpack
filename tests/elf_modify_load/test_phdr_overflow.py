@@ -36,7 +36,8 @@ def test_binary():
             "gcc",
             "-O0",
             "-g",
-            "-o", str(output),
+            "-o",
+            str(output),
             str(source),
             "-Wl,--section-start=.testdata=0x10000",
         ],
@@ -69,7 +70,7 @@ def test_forced_overflow_produces_valid_binary(test_binary):
             output,
             section_name=".testdata",
             verbose=True,
-            force_overflow=True
+            force_overflow=True,
         )
 
         assert success, "Zero-paging should succeed even with overflow"
@@ -90,7 +91,9 @@ def test_forced_overflow_produces_valid_binary(test_binary):
             capture_output=True,
             text=True,
         )
-        assert "/lib64/ld-linux-x86-64.so.2" in result.stdout, "Interpreter should be preserved"
+        assert (
+            "/lib64/ld-linux-x86-64.so.2" in result.stdout
+        ), "Interpreter should be preserved"
 
         # Verify binary can execute
         result = subprocess.run(
@@ -98,7 +101,9 @@ def test_forced_overflow_produces_valid_binary(test_binary):
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0, f"Binary should execute successfully: {result.stderr}"
+        assert (
+            result.returncode == 0
+        ), f"Binary should execute successfully: {result.stderr}"
         assert "SUCCESS" in result.stdout, "Binary should report success"
 
     finally:
@@ -122,7 +127,7 @@ def test_overflow_handling_with_padding(test_binary):
             output,
             section_name=".testdata",
             verbose=False,
-            force_overflow=True
+            force_overflow=True,
         )
 
         assert success, "Zero-paging should succeed with padding"
@@ -139,10 +144,13 @@ def test_overflow_handling_with_padding(test_binary):
         # Check that program headers are relocated (offset > 1000)
         assert "starting at offset" in result.stdout
         import re
+
         match = re.search(r"starting at offset (\d+)", result.stdout)
         if match:
             offset = int(match.group(1))
-            assert offset > 1000, f"Program headers should be relocated, found at {offset}"
+            assert (
+                offset > 1000
+            ), f"Program headers should be relocated, found at {offset}"
 
     finally:
         output.unlink(missing_ok=True)

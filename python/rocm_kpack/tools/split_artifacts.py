@@ -42,7 +42,7 @@ def parse_artifact_name(artifact_dir_name: str) -> Optional[str]:
     Returns:
         Artifact prefix (name_component) like "blas_lib", or None if target_family is "generic"
     """
-    parts = artifact_dir_name.split('_')
+    parts = artifact_dir_name.split("_")
 
     # Need at least 2 parts: artifact prefix and target family
     if len(parts) < 2:
@@ -56,7 +56,7 @@ def parse_artifact_name(artifact_dir_name: str) -> Optional[str]:
         return None
 
     # Artifact prefix is everything except the target family
-    artifact_prefix = '_'.join(parts[:-1])
+    artifact_prefix = "_".join(parts[:-1])
 
     return artifact_prefix
 
@@ -101,7 +101,7 @@ def single_split(args, toolchain: Toolchain):
         artifact_prefix=args.artifact_prefix,
         toolchain=toolchain,
         database_handlers=database_handlers,
-        verbose=args.verbose
+        verbose=args.verbose,
     )
 
     print(f"Splitting artifact: {args.input_dir}")
@@ -164,7 +164,9 @@ def batch_split(args, toolchain: Toolchain):
             continue
 
         total += 1
-        print(f"[{total}] Processing: {artifact_dir.name} (artifact_prefix: {artifact_prefix})")
+        print(
+            f"[{total}] Processing: {artifact_dir.name} (artifact_prefix: {artifact_prefix})"
+        )
 
         # Run split
         try:
@@ -172,7 +174,7 @@ def batch_split(args, toolchain: Toolchain):
                 artifact_prefix=artifact_prefix,
                 toolchain=toolchain,
                 database_handlers=database_handlers,
-                verbose=args.verbose
+                verbose=args.verbose,
             )
 
             splitter.split(artifact_dir, args.output_dir)
@@ -184,6 +186,7 @@ def batch_split(args, toolchain: Toolchain):
             print(f"    ✗ Failed: {e}", file=sys.stderr)
             if args.verbose:
                 import traceback
+
                 traceback.print_exc()
 
     # Print summary
@@ -235,7 +238,7 @@ Batch Mode:
 
   # Batch mode with verbose output
   %(prog)s --batch-artifact-parent-dir /path/to/shard --output-dir output/ --verbose
-"""
+""",
     )
 
     # Mutually exclusive group for input mode
@@ -243,20 +246,20 @@ Batch Mode:
     input_group.add_argument(
         "--artifact-dir",
         type=Path,
-        help="Single mode: artifact directory containing artifact_manifest.txt"
+        help="Single mode: artifact directory containing artifact_manifest.txt",
     )
 
     input_group.add_argument(
         "--batch-artifact-parent-dir",
         type=Path,
-        help="Batch mode: parent directory containing multiple artifact subdirectories"
+        help="Batch mode: parent directory containing multiple artifact subdirectories",
     )
 
     parser.add_argument(
         "--output-dir",
         type=Path,
         required=True,
-        help="Output directory for split artifacts"
+        help="Output directory for split artifacts",
     )
 
     parser.add_argument(
@@ -264,7 +267,7 @@ Batch Mode:
         type=str,
         default=None,
         help="Artifact prefix name_component (e.g., 'blas_lib' from 'blas_lib_gfx1100'). "
-             "Required with --artifact-dir, forbidden with --batch-artifact-parent-dir."
+        "Required with --artifact-dir, forbidden with --batch-artifact-parent-dir.",
     )
 
     parser.add_argument(
@@ -272,27 +275,23 @@ Batch Mode:
         nargs="+",
         choices=available_handlers,
         default=None,
-        help=f"Enable database splitting for specified types. Available: {', '.join(available_handlers)}"
+        help=f"Enable database splitting for specified types. Available: {', '.join(available_handlers)}",
     )
 
     parser.add_argument(
         "--tmp-dir",
         type=Path,
         default=Path(tempfile.gettempdir()),
-        help=f"Temporary directory for intermediate files (default: {tempfile.gettempdir()})"
+        help=f"Temporary directory for intermediate files (default: {tempfile.gettempdir()})",
     )
 
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose output"
-    )
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
 
     parser.add_argument(
         "--clang-offload-bundler",
         type=Path,
         default=None,
-        help="Path to clang-offload-bundler tool (will search PATH if not specified)"
+        help="Path to clang-offload-bundler tool (will search PATH if not specified)",
     )
 
     args = parser.parse_args()
@@ -302,13 +301,17 @@ Batch Mode:
         is_batch_mode = args.batch_artifact_parent_dir is not None
 
         if is_batch_mode and args.artifact_prefix:
-            raise ValueError("--artifact-prefix cannot be used with --batch-artifact-parent-dir")
+            raise ValueError(
+                "--artifact-prefix cannot be used with --batch-artifact-parent-dir"
+            )
 
         if not is_batch_mode and not args.artifact_prefix:
             raise ValueError("--artifact-prefix is required with --artifact-dir")
 
         # Set input_dir based on mode for backward compatibility with single_split/batch_split
-        input_dir = args.batch_artifact_parent_dir if is_batch_mode else args.artifact_dir
+        input_dir = (
+            args.batch_artifact_parent_dir if is_batch_mode else args.artifact_dir
+        )
 
         # Validate input directory
         if not input_dir.exists():
@@ -352,6 +355,7 @@ Batch Mode:
         print(f"Error: {e}", file=sys.stderr)
         if args.verbose:
             import traceback
+
             traceback.print_exc()
         return 1
 

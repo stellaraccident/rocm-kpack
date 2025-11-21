@@ -5,10 +5,12 @@ This directory contains infrastructure for generating test assets used to valida
 ## Overview
 
 The test assets are versioned by:
+
 - **Platform**: `linux` (ELF) or `windows` (COFF)
 - **Code Object Version**: `cov5`, `cov6`, etc.
 
 Test bundles cover different scenarios:
+
 - Single vs multiple GPU architectures
 - Uncompressed vs compressed code objects
 - Various architecture combinations (CDNA, RDNA, etc.)
@@ -49,6 +51,7 @@ python build_test_bundles.py --rocm-path "C:\Program Files\AMD\ROCm"
 ## Output Structure
 
 Generated test assets are placed in:
+
 ```
 test_assets/bundled_binaries/
 ├── linux/
@@ -80,6 +83,7 @@ test_assets/bundled_binaries/
 ## Test Bundle Types
 
 All test bundles are fully linked executables or shared libraries (not intermediate object files). This ensures:
+
 - Cross-platform compatibility (Linux ELF and Windows PE/COFF)
 - Realistic unbundling scenarios matching actual deployment
 - Consistent behavior across different toolchains
@@ -87,31 +91,37 @@ All test bundles are fully linked executables or shared libraries (not intermedi
 ### Executables
 
 #### test_kernel_single / test_kernel_single.exe
+
 - Single architecture: gfx1100
 - Minimal test case for basic unbundling
 
 #### test_kernel_multi / test_kernel_multi.exe
+
 - Multiple architectures: gfx1100, gfx1101
 - Tests multi-target handling
 
 #### test_kernel_compressed / test_kernel_compressed.exe
+
 - Multiple architectures: gfx1100, gfx1101
 - Compressed code objects (CCOB format) if compiler supports it
 - Tests compression handling
 - Falls back to uncompressed if compression not supported
 
 #### test_kernel_wide / test_kernel_wide.exe
+
 - Wide architecture coverage: gfx900, gfx906, gfx908, gfx90a, gfx1100
 - Tests handling of diverse architecture sets (CDNA + RDNA)
 
 ### Shared Libraries
 
 #### libtest_kernel_single.so / test_kernel_single.dll
+
 - Single architecture: gfx1100
 - Shared library format
 - Tests unbundling from libraries
 
 #### libtest_kernel_multi.so / test_kernel_multi.dll
+
 - Multiple architectures: gfx1100, gfx1101
 - Shared library format
 - Tests multi-arch unbundling from libraries
@@ -119,17 +129,18 @@ All test bundles are fully linked executables or shared libraries (not intermedi
 ## Regenerating Test Assets
 
 Test assets should be regenerated when:
+
 1. **Toolchain updates**: New ROCm/HIP versions may produce different bundle formats
-2. **New architectures**: Adding support for new GPU architectures
-3. **Format changes**: Code object format changes (e.g., COV5 → COV6)
-4. **Bug fixes**: Issues found with specific bundle types
+1. **New architectures**: Adding support for new GPU architectures
+1. **Format changes**: Code object format changes (e.g., COV5 → COV6)
+1. **Bug fixes**: Issues found with specific bundle types
 
 ### Process
 
 1. Update `simple_kernel.hip` if needed (keep it minimal!)
-2. Run `build_test_bundles.py` on target platform
-3. Commit generated binaries to `test_assets/bundled_binaries/`
-4. Update test cases to cover new variants
+1. Run `build_test_bundles.py` on target platform
+1. Commit generated binaries to `test_assets/bundled_binaries/`
+1. Update test cases to cover new variants
 
 ### Best Practices
 
@@ -143,9 +154,9 @@ Test assets should be regenerated when:
 Windows uses COFF (Common Object File Format) instead of ELF. To generate Windows test assets:
 
 1. Set up Windows environment with HIP/ROCm SDK
-2. Run the same `build_test_bundles.py` script
-3. Script automatically detects platform and generates COFF bundles
-4. Commit to `test_assets/bundled_binaries/windows/`
+1. Run the same `build_test_bundles.py` script
+1. Script automatically detects platform and generates COFF bundles
+1. Commit to `test_assets/bundled_binaries/windows/`
 
 **Note**: Windows COFF bundles use the same clang-offload-bundler tool but produce different binary formats that must be handled separately during unbundling.
 
@@ -163,12 +174,14 @@ The test bundles help validate handling of:
 ## Integration with Tests
 
 Test bundles are consumed by:
+
 - `tests/test_binutils.py`: Basic unbundling tests
 - `tests/test_artifact_scanner.py`: Tree scanning with bundled binaries
 - Future: `tests/test_unbundling_comprehensive.py`: Exhaustive bundle testing
 
 Each test should:
+
 1. Load test bundle from `test_assets/bundled_binaries/`
-2. Unbundle and validate contents
-3. Check for expected architectures
-4. Verify code object integrity
+1. Unbundle and validate contents
+1. Check for expected architectures
+1. Verify code object integrity

@@ -31,6 +31,7 @@ from .binutils import get_section_vaddr, Toolchain
 
 class ElfHeader(NamedTuple):
     """ELF file header (Elf64_Ehdr)"""
+
     e_ident: bytes  # 16 bytes - magic, class, endianness, etc
     e_type: int
     e_machine: int
@@ -49,6 +50,7 @@ class ElfHeader(NamedTuple):
 
 class ProgramHeader(NamedTuple):
     """Program header (Elf64_Phdr)"""
+
     p_type: int
     p_flags: int
     p_offset: int
@@ -61,6 +63,7 @@ class ProgramHeader(NamedTuple):
 
 class SectionHeader(NamedTuple):
     """Section header (Elf64_Shdr)"""
+
     sh_name: int
     sh_type: int
     sh_flags: int
@@ -76,7 +79,7 @@ class SectionHeader(NamedTuple):
 # Constants
 PT_LOAD = 1
 PT_DYNAMIC = 2
-PT_GNU_EH_FRAME = 0x6474e550
+PT_GNU_EH_FRAME = 0x6474E550
 
 SHT_NULL = 0
 SHT_PROGBITS = 1
@@ -99,9 +102,9 @@ DT_INIT_ARRAY = 25
 DT_FINI_ARRAY = 26
 DT_PREINIT_ARRAY = 32
 DT_SYMTAB_SHNDX = 34
-DT_VERSYM = 0x6ffffff0
-DT_VERDEF = 0x6ffffffc
-DT_VERNEED = 0x6ffffffe
+DT_VERSYM = 0x6FFFFFF0
+DT_VERDEF = 0x6FFFFFFC
+DT_VERNEED = 0x6FFFFFFE
 
 # Tags that contain addresses (not sizes or other values)
 DT_ADDR_TAGS = {
@@ -152,7 +155,7 @@ class ElfOffloadKpacker:
     def _parse_elf_header(self) -> ElfHeader:
         """Parse ELF header (assumes 64-bit little-endian)"""
         # Verify ELF magic
-        if self.data[:4] != b'\x7fELF':
+        if self.data[:4] != b"\x7fELF":
             raise ValueError("Not an ELF file")
 
         # Verify 64-bit
@@ -164,7 +167,7 @@ class ElfOffloadKpacker:
             raise ValueError("Only little-endian ELF supported")
 
         # Parse header (64 bytes total)
-        fmt = '<16sHHIQQQIHHHHHH'  # Little-endian, see Elf64_Ehdr
+        fmt = "<16sHHIQQQIHHHHHH"  # Little-endian, see Elf64_Ehdr
         fields = struct.unpack_from(fmt, self.data, 0)
 
         return ElfHeader(*fields)
@@ -177,7 +180,7 @@ class ElfOffloadKpacker:
         size = self.elf_header.e_phentsize
 
         # Elf64_Phdr format
-        fmt = '<IIQQQQQQ'
+        fmt = "<IIQQQQQQ"
 
         for i in range(count):
             fields = struct.unpack_from(fmt, self.data, offset + i * size)
@@ -193,7 +196,7 @@ class ElfOffloadKpacker:
         size = self.elf_header.e_shentsize
 
         # Elf64_Shdr format
-        fmt = '<IIQQQQIIQQ'
+        fmt = "<IIQQQQIIQQ"
 
         for i in range(count):
             fields = struct.unpack_from(fmt, self.data, offset + i * size)
@@ -207,7 +210,9 @@ class ElfOffloadKpacker:
             return {}
 
         shstrtab = self.section_headers[self.elf_header.e_shstrndx]
-        strtab_data = self.data[shstrtab.sh_offset:shstrtab.sh_offset + shstrtab.sh_size]
+        strtab_data = self.data[
+            shstrtab.sh_offset : shstrtab.sh_offset + shstrtab.sh_size
+        ]
 
         names = {}
         for idx, shdr in enumerate(self.section_headers):
@@ -217,11 +222,11 @@ class ElfOffloadKpacker:
                 names[idx] = ""
                 continue
 
-            end = strtab_data.find(b'\x00', name_offset)
+            end = strtab_data.find(b"\x00", name_offset)
             if end == -1:
                 end = len(strtab_data)
 
-            names[idx] = strtab_data[name_offset:end].decode('utf-8', errors='replace')
+            names[idx] = strtab_data[name_offset:end].decode("utf-8", errors="replace")
 
         return names
 
@@ -259,16 +264,16 @@ class ElfOffloadKpacker:
             seg_end = phdr.p_offset + phdr.p_filesz
 
             if removal_offset >= seg_start and removal_offset < seg_end:
-                phdrs_to_update.append((idx, 'contains'))
+                phdrs_to_update.append((idx, "contains"))
             elif phdr.p_offset > removal_offset:
-                phdrs_to_update.append((idx, 'follows'))
+                phdrs_to_update.append((idx, "follows"))
 
         return {
-            'removal_size': removal_size,
-            'removal_offset': removal_offset,
-            'removal_vaddr': removal_vaddr,
-            'sections_to_shift': sections_to_shift,
-            'phdrs_to_update': phdrs_to_update,
+            "removal_size": removal_size,
+            "removal_offset": removal_offset,
+            "removal_vaddr": removal_vaddr,
+            "sections_to_shift": sections_to_shift,
+            "phdrs_to_update": phdrs_to_update,
         }
 
     def rebuild(self, output_path: Path, *, verbose: bool = False) -> dict:
@@ -276,14 +281,16 @@ class ElfOffloadKpacker:
         if not self.has_hip_fatbin():
             # No work needed, just copy
             output_path.write_bytes(self.data)
-            return {'removed': 0}
+            return {"removed": 0}
 
         plan = self.calculate_removal_plan()
-        removal_size = plan['removal_size']
-        removal_offset = plan['removal_offset']
+        removal_size = plan["removal_size"]
+        removal_offset = plan["removal_offset"]
 
         if verbose:
-            print(f"  Removing .hip_fatbin: offset=0x{removal_offset:x}, size=0x{removal_size:x} ({removal_size:,} bytes)")
+            print(
+                f"  Removing .hip_fatbin: offset=0x{removal_offset:x}, size=0x{removal_size:x} ({removal_size:,} bytes)"
+            )
 
         # Build new file content
         new_data = bytearray()
@@ -312,67 +319,73 @@ class ElfOffloadKpacker:
         os.chmod(output_path, self.original_mode)
 
         return {
-            'removed': removal_size,
-            'original_size': len(self.data),
-            'new_size': len(new_data),
+            "removed": removal_size,
+            "original_size": len(self.data),
+            "new_size": len(new_data),
         }
 
     def _update_elf_header(self, data: bytearray, plan: dict):
         """Update ELF header in rebuilt file"""
-        removal_size = plan['removal_size']
-        removal_vaddr = plan['removal_vaddr']
+        removal_size = plan["removal_size"]
+        removal_vaddr = plan["removal_vaddr"]
         ehdr = self.elf_header
 
         # If entry point comes after .hip_fatbin in virtual address space, shift it
         if ehdr.e_entry >= removal_vaddr:
             new_entry = ehdr.e_entry - removal_size
-            struct.pack_into('<Q', data, 24, new_entry)
+            struct.pack_into("<Q", data, 24, new_entry)
 
         # If section header table comes after .hip_fatbin, shift it
         new_shoff = ehdr.e_shoff
-        if ehdr.e_shoff > plan['removal_offset']:
+        if ehdr.e_shoff > plan["removal_offset"]:
             new_shoff -= removal_size
 
         # Update e_shoff
-        struct.pack_into('<Q', data, 40, new_shoff)
+        struct.pack_into("<Q", data, 40, new_shoff)
 
-    def _update_program_headers(self, data: bytearray, plan: dict, *, verbose: bool = False):
+    def _update_program_headers(
+        self, data: bytearray, plan: dict, *, verbose: bool = False
+    ):
         """Update program headers in rebuilt file"""
-        removal_size = plan['removal_size']
+        removal_size = plan["removal_size"]
         phdr_offset = self.elf_header.e_phoff
 
-        for idx, action in plan['phdrs_to_update']:
+        for idx, action in plan["phdrs_to_update"]:
             phdr = self.program_headers[idx]
             offset = phdr_offset + idx * self.elf_header.e_phentsize
 
-            if action == 'contains':
+            if action == "contains":
                 # This segment contains .hip_fatbin - reduce its size
                 new_filesz = phdr.p_filesz - removal_size
                 new_memsz = phdr.p_memsz - removal_size
 
-                struct.pack_into('<Q', data, offset + 32, new_filesz)
-                struct.pack_into('<Q', data, offset + 40, new_memsz)
+                struct.pack_into("<Q", data, offset + 32, new_filesz)
+                struct.pack_into("<Q", data, offset + 40, new_memsz)
 
                 if verbose:
-                    print(f"  Updated PT_LOAD segment: filesz 0x{phdr.p_filesz:x} -> 0x{new_filesz:x}")
+                    print(
+                        f"  Updated PT_LOAD segment: filesz 0x{phdr.p_filesz:x} -> 0x{new_filesz:x}"
+                    )
 
-            elif action == 'follows':
+            elif action == "follows":
                 # This segment comes after .hip_fatbin - shift it
                 new_offset = phdr.p_offset - removal_size
                 new_vaddr = phdr.p_vaddr - removal_size
                 new_paddr = phdr.p_paddr - removal_size
 
-                struct.pack_into('<Q', data, offset + 8, new_offset)
-                struct.pack_into('<Q', data, offset + 16, new_vaddr)
-                struct.pack_into('<Q', data, offset + 24, new_paddr)
+                struct.pack_into("<Q", data, offset + 8, new_offset)
+                struct.pack_into("<Q", data, offset + 16, new_vaddr)
+                struct.pack_into("<Q", data, offset + 24, new_paddr)
 
-    def _update_section_headers(self, data: bytearray, plan: dict, *, verbose: bool = False):
+    def _update_section_headers(
+        self, data: bytearray, plan: dict, *, verbose: bool = False
+    ):
         """Update section headers in rebuilt file"""
-        removal_size = plan['removal_size']
+        removal_size = plan["removal_size"]
 
         # Section header table might have shifted
         shdr_offset = self.elf_header.e_shoff
-        if shdr_offset > plan['removal_offset']:
+        if shdr_offset > plan["removal_offset"]:
             shdr_offset -= removal_size
 
         for idx, shdr in enumerate(self.section_headers):
@@ -380,31 +393,39 @@ class ElfOffloadKpacker:
 
             if idx == self.hip_fatbin_idx:
                 # Mark .hip_fatbin as NULL
-                struct.pack_into('<I', data, offset + 4, SHT_NULL)
-                struct.pack_into('<Q', data, offset + 32, 0)  # sh_size = 0
+                struct.pack_into("<I", data, offset + 4, SHT_NULL)
+                struct.pack_into("<Q", data, offset + 32, 0)  # sh_size = 0
                 if verbose:
                     print(f"  Marked .hip_fatbin section as SHT_NULL")
 
-            elif idx in plan['sections_to_shift']:
+            elif idx in plan["sections_to_shift"]:
                 # Shift this section
                 new_offset = shdr.sh_offset - removal_size
 
                 # Only shift virtual address if section was allocated after .hip_fatbin
-                if shdr.sh_addr > 0 and shdr.sh_addr >= plan['removal_vaddr']:
+                if shdr.sh_addr > 0 and shdr.sh_addr >= plan["removal_vaddr"]:
                     new_addr = shdr.sh_addr - removal_size
-                    struct.pack_into('<Q', data, offset + 16, new_addr)  # sh_addr at offset+16
+                    struct.pack_into(
+                        "<Q", data, offset + 16, new_addr
+                    )  # sh_addr at offset+16
 
                 # Always shift file offset
-                struct.pack_into('<Q', data, offset + 24, new_offset)  # sh_offset at offset+24
+                struct.pack_into(
+                    "<Q", data, offset + 24, new_offset
+                )  # sh_offset at offset+24
 
                 if verbose:
                     section_name = self.section_names.get(idx, f"section_{idx}")
-                    print(f"  Shifted {section_name}: offset 0x{shdr.sh_offset:x} -> 0x{new_offset:x}")
+                    print(
+                        f"  Shifted {section_name}: offset 0x{shdr.sh_offset:x} -> 0x{new_offset:x}"
+                    )
 
-    def _update_dynamic_section(self, data: bytearray, plan: dict, *, verbose: bool = False):
+    def _update_dynamic_section(
+        self, data: bytearray, plan: dict, *, verbose: bool = False
+    ):
         """Update dynamic section entries that contain virtual addresses"""
-        removal_size = plan['removal_size']
-        removal_vaddr = plan['removal_vaddr']
+        removal_size = plan["removal_size"]
+        removal_vaddr = plan["removal_vaddr"]
 
         # Find PT_DYNAMIC segment
         dynamic_phdr = None
@@ -422,8 +443,8 @@ class ElfOffloadKpacker:
         # Calculate the new offset for the dynamic section after removal
         # The dynamic section may have shifted if it came after .hip_fatbin
         dynamic_offset = dynamic_phdr.p_offset
-        for idx, action in plan['phdrs_to_update']:
-            if idx == dynamic_phdr_idx and action == 'follows':
+        for idx, action in plan["phdrs_to_update"]:
+            if idx == dynamic_phdr_idx and action == "follows":
                 dynamic_offset -= removal_size
                 break
 
@@ -437,8 +458,8 @@ class ElfOffloadKpacker:
             entry_offset = dynamic_offset + i * entry_size
 
             # Read tag and value
-            tag = struct.unpack_from('<q', data, entry_offset)[0]
-            value = struct.unpack_from('<Q', data, entry_offset + 8)[0]
+            tag = struct.unpack_from("<q", data, entry_offset)[0]
+            value = struct.unpack_from("<Q", data, entry_offset + 8)[0]
 
             # DT_NULL marks end of dynamic section
             if tag == DT_NULL:
@@ -450,38 +471,42 @@ class ElfOffloadKpacker:
                 # (addresses before .hip_fatbin don't need shifting)
                 if value >= removal_vaddr:
                     new_value = value - removal_size
-                    struct.pack_into('<Q', data, entry_offset + 8, new_value)
+                    struct.pack_into("<Q", data, entry_offset + 8, new_value)
                     updated_count += 1
 
                     if verbose:
-                        print(f"  Updated dynamic entry tag={tag}: 0x{value:x} -> 0x{new_value:x}")
+                        print(
+                            f"  Updated dynamic entry tag={tag}: 0x{value:x} -> 0x{new_value:x}"
+                        )
 
         if verbose and updated_count > 0:
             print(f"  Updated {updated_count} dynamic section entries")
 
-    def _update_relocations(self, data: bytearray, plan: dict, *, verbose: bool = False):
+    def _update_relocations(
+        self, data: bytearray, plan: dict, *, verbose: bool = False
+    ):
         """Update relocation entries (RELA/REL) that reference shifted addresses"""
-        removal_size = plan['removal_size']
-        removal_vaddr = plan['removal_vaddr']
+        removal_size = plan["removal_size"]
+        removal_vaddr = plan["removal_vaddr"]
 
         # Find .rela.dyn and .rela.plt sections (or .rel.dyn/.rel.plt for REL format)
         rela_sections = []
         for idx, shdr in enumerate(self.section_headers):
-            section_name = self.section_names.get(idx, '')
+            section_name = self.section_names.get(idx, "")
             # Check for both RELA and REL sections
-            if section_name in ['.rela.dyn', '.rela.plt', '.rel.dyn', '.rel.plt']:
+            if section_name in [".rela.dyn", ".rela.plt", ".rel.dyn", ".rel.plt"]:
                 rela_sections.append((idx, section_name, shdr))
 
         updated_count = 0
         for idx, name, shdr in rela_sections:
             # Calculate the current offset of this section (may have shifted)
             section_offset = shdr.sh_offset
-            if idx in plan['sections_to_shift']:
+            if idx in plan["sections_to_shift"]:
                 section_offset -= removal_size
 
             # Determine if this is RELA (24 bytes) or REL (16 bytes)
             # RELA has addend, REL doesn't
-            is_rela = 'rela' in name.lower()
+            is_rela = "rela" in name.lower()
             entry_size = 24 if is_rela else 16
 
             num_entries = shdr.sh_size // entry_size
@@ -490,52 +515,58 @@ class ElfOffloadKpacker:
                 entry_offset = section_offset + i * entry_size
 
                 # Read r_offset (first 8 bytes)
-                r_offset = struct.unpack_from('<Q', data, entry_offset)[0]
+                r_offset = struct.unpack_from("<Q", data, entry_offset)[0]
 
                 # Update r_offset if it points to a shifted location
                 if r_offset >= removal_vaddr:
                     new_r_offset = r_offset - removal_size
-                    struct.pack_into('<Q', data, entry_offset, new_r_offset)
+                    struct.pack_into("<Q", data, entry_offset, new_r_offset)
                     updated_count += 1
 
                     if verbose:
-                        print(f"  Updated {name} entry {i}: r_offset 0x{r_offset:x} -> 0x{new_r_offset:x}")
+                        print(
+                            f"  Updated {name} entry {i}: r_offset 0x{r_offset:x} -> 0x{new_r_offset:x}"
+                        )
 
                 # For RELA entries, also check r_addend (third 8 bytes)
                 if is_rela:
-                    r_addend = struct.unpack_from('<q', data, entry_offset + 16)[0]
+                    r_addend = struct.unpack_from("<q", data, entry_offset + 16)[0]
                     # Only update if addend points PAST the removed section
                     # Don't update if it points TO or WITHIN the removed section
                     removal_end = removal_vaddr + removal_size
                     if r_addend >= removal_end:
                         new_r_addend = r_addend - removal_size
-                        struct.pack_into('<q', data, entry_offset + 16, new_r_addend)
+                        struct.pack_into("<q", data, entry_offset + 16, new_r_addend)
                         updated_count += 1
 
                         if verbose:
-                            print(f"  Updated {name} entry {i}: r_addend 0x{r_addend:x} -> 0x{new_r_addend:x}")
+                            print(
+                                f"  Updated {name} entry {i}: r_addend 0x{r_addend:x} -> 0x{new_r_addend:x}"
+                            )
 
         if verbose and updated_count > 0:
             print(f"  Updated {updated_count} relocation entries")
 
-    def _update_got_sections(self, data: bytearray, plan: dict, *, verbose: bool = False):
+    def _update_got_sections(
+        self, data: bytearray, plan: dict, *, verbose: bool = False
+    ):
         """Update GOT and GOT.PLT section pointers that reference shifted addresses"""
-        removal_size = plan['removal_size']
-        removal_vaddr = plan['removal_vaddr']
+        removal_size = plan["removal_size"]
+        removal_vaddr = plan["removal_vaddr"]
         removal_end = removal_vaddr + removal_size
 
         # Find .got and .got.plt sections
         got_sections = []
         for idx, shdr in enumerate(self.section_headers):
-            section_name = self.section_names.get(idx, '')
-            if section_name in ['.got', '.got.plt']:
+            section_name = self.section_names.get(idx, "")
+            if section_name in [".got", ".got.plt"]:
                 got_sections.append((idx, section_name, shdr))
 
         updated_count = 0
         for idx, name, shdr in got_sections:
             # Calculate the current offset of this section (may have shifted)
             section_offset = shdr.sh_offset
-            if idx in plan['sections_to_shift']:
+            if idx in plan["sections_to_shift"]:
                 section_offset -= removal_size
 
             # GOT entries are 8 bytes (pointers)
@@ -546,7 +577,7 @@ class ElfOffloadKpacker:
                 entry_offset = section_offset + i * entry_size
 
                 # Read the pointer value
-                ptr_value = struct.unpack_from('<Q', data, entry_offset)[0]
+                ptr_value = struct.unpack_from("<Q", data, entry_offset)[0]
 
                 # Skip null pointers
                 if ptr_value == 0:
@@ -556,11 +587,13 @@ class ElfOffloadKpacker:
                 # Only update if it points PAST the removed section
                 if ptr_value >= removal_end:
                     new_ptr_value = ptr_value - removal_size
-                    struct.pack_into('<Q', data, entry_offset, new_ptr_value)
+                    struct.pack_into("<Q", data, entry_offset, new_ptr_value)
                     updated_count += 1
 
                     if verbose:
-                        print(f"  Updated {name} entry {i}: 0x{ptr_value:x} -> 0x{new_ptr_value:x}")
+                        print(
+                            f"  Updated {name} entry {i}: 0x{ptr_value:x} -> 0x{new_ptr_value:x}"
+                        )
 
         if verbose and updated_count > 0:
             print(f"  Updated {updated_count} GOT entries")
@@ -598,17 +631,19 @@ def _rewrite_hipfatbin_magic(data: bytearray, *, verbose: bool = False) -> bool:
         raise RuntimeError(f"Failed to parse ELF header: {e}") from e
 
     # Find .hipFatBinSegment section
-    shstrtab_shdr = elf_modify_load.read_section_header(data, ehdr.e_shoff + ehdr.e_shstrndx * 64)
+    shstrtab_shdr = elf_modify_load.read_section_header(
+        data, ehdr.e_shoff + ehdr.e_shstrndx * 64
+    )
     shstrtab_offset = shstrtab_shdr.sh_offset
 
     hipfatbin_segment_shdr = None
     for i in range(ehdr.e_shnum):
         shdr = elf_modify_load.read_section_header(data, ehdr.e_shoff + i * 64)
         name_offset = shstrtab_offset + shdr.sh_name
-        name_end = data.find(b'\x00', name_offset)
-        name = data[name_offset:name_end].decode('utf-8')
+        name_end = data.find(b"\x00", name_offset)
+        name = data[name_offset:name_end].decode("utf-8")
 
-        if name == '.hipFatBinSegment':
+        if name == ".hipFatBinSegment":
             hipfatbin_segment_shdr = shdr
             break
 
@@ -620,7 +655,7 @@ def _rewrite_hipfatbin_magic(data: bytearray, *, verbose: bool = False) -> bool:
 
     # Read current magic at offset 0 of the section
     section_offset = hipfatbin_segment_shdr.sh_offset
-    current_magic = struct.unpack_from('<I', data, section_offset)[0]
+    current_magic = struct.unpack_from("<I", data, section_offset)[0]
 
     if current_magic == HIPK_MAGIC:
         if verbose:
@@ -641,11 +676,11 @@ def _rewrite_hipfatbin_magic(data: bytearray, *, verbose: bool = False) -> bool:
         print(f"    New magic:     0x{HIPK_MAGIC:08x} (HIPK)")
 
     # Rewrite magic from HIPF to HIPK
-    struct.pack_into('<I', data, section_offset, HIPK_MAGIC)
+    struct.pack_into("<I", data, section_offset, HIPK_MAGIC)
 
     # Zero out the binary pointer (offset 8, 8 bytes)
     # This is safe because device code has been removed
-    struct.pack_into('<Q', data, section_offset + 8, 0)
+    struct.pack_into("<Q", data, section_offset + 8, 0)
 
     if verbose:
         print(f"    Zeroed binary pointer at offset 0x{section_offset + 8:x}")
@@ -658,7 +693,7 @@ def kpack_offload_binary(
     output_path: Path,
     *,
     toolchain: Toolchain | None = None,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> dict:
     """
     Transform an ELF fat binary by mapping kpack reference and removing device code.
@@ -693,9 +728,9 @@ def kpack_offload_binary(
     has_fatbin = kpacker.has_hip_fatbin()
 
     # Temporary files for pipeline
-    temp_zeropaged = output_path.with_suffix(output_path.suffix + '.zeropaged')
-    temp_mapped = output_path.with_suffix(output_path.suffix + '.mapped')
-    temp_pointed = output_path.with_suffix(output_path.suffix + '.pointed')
+    temp_zeropaged = output_path.with_suffix(output_path.suffix + ".zeropaged")
+    temp_mapped = output_path.with_suffix(output_path.suffix + ".mapped")
+    temp_pointed = output_path.with_suffix(output_path.suffix + ".pointed")
 
     try:
         # Phase 1: Zero-page .hip_fatbin section (skip if no .hip_fatbin)
@@ -704,10 +739,7 @@ def kpack_offload_binary(
                 print(f"\nPhase 1: Zero-page .hip_fatbin")
 
             success = elf_modify_load.conservative_zero_page(
-                input_path,
-                temp_zeropaged,
-                section_name=".hip_fatbin",
-                verbose=verbose
+                input_path, temp_zeropaged, section_name=".hip_fatbin", verbose=verbose
             )
 
             if not success:
@@ -727,7 +759,7 @@ def kpack_offload_binary(
             temp_mapped,
             section_name=".rocm_kpack_ref",
             new_vaddr=None,  # Auto-allocate
-            verbose=verbose
+            verbose=verbose,
         )
 
         if not success:
@@ -745,7 +777,9 @@ def kpack_offload_binary(
                 print(f"  .rocm_kpack_ref mapped to: 0x{kpack_ref_vaddr:x}")
 
             # Find .hipFatBinSegment section address (contains __CudaFatBinaryWrapper)
-            hipfatbin_segment_vaddr = get_section_vaddr(toolchain, temp_mapped, ".hipFatBinSegment")
+            hipfatbin_segment_vaddr = get_section_vaddr(
+                toolchain, temp_mapped, ".hipFatBinSegment"
+            )
             if hipfatbin_segment_vaddr is None:
                 raise RuntimeError(".hipFatBinSegment section not found")
 
@@ -759,7 +793,7 @@ def kpack_offload_binary(
                 pointer_vaddr=pointer_vaddr,
                 target_vaddr=kpack_ref_vaddr,
                 update_relocation=True,
-                verbose=verbose
+                verbose=verbose,
             )
 
             if not success:
@@ -774,7 +808,9 @@ def kpack_offload_binary(
         else:
             # No .hip_fatbin, skip pointer update and magic rewrite
             if verbose:
-                print(f"\nPhases 3-5: No .hip_fatbin section, skipping pointer update and magic rewrite")
+                print(
+                    f"\nPhases 3-5: No .hip_fatbin section, skipping pointer update and magic rewrite"
+                )
             data = bytearray(temp_mapped.read_bytes())
 
         # Write final output
@@ -788,13 +824,15 @@ def kpack_offload_binary(
             print(f"\nNeutralization complete:")
             print(f"  Original size: {original_size:,} bytes")
             print(f"  Final size:    {final_size:,} bytes")
-            print(f"  Removed:       {removed:,} bytes ({100 * removed / original_size:.1f}%)")
+            print(
+                f"  Removed:       {removed:,} bytes ({100 * removed / original_size:.1f}%)"
+            )
 
         return {
-            'removed': removed,
-            'original_size': original_size,
-            'new_size': final_size,
-            'kpack_ref_vaddr': kpack_ref_vaddr
+            "removed": removed,
+            "original_size": original_size,
+            "new_size": final_size,
+            "kpack_ref_vaddr": kpack_ref_vaddr,
         }
 
     finally:

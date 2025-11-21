@@ -33,6 +33,7 @@ from rocm_kpack.elf_offload_kpacker import kpack_offload_binary
 @dataclass
 class ExtractedKernel:
     """Represents a kernel extracted from a fat binary."""
+
     target_name: str  # Target identifier from bundler (e.g., "hip-amdgcn-amd-amdhsa-gfx1100")
     kernel_data: bytes  # The actual kernel binary data
     source_binary_relpath: str  # Path to the original fat binary relative to prefix
@@ -43,6 +44,7 @@ class ExtractedKernel:
 @dataclass
 class KpackInfo:
     """Information about a created kpack file."""
+
     kpack_path: Path  # Path to the kpack file
     size: int  # Size of the kpack file in bytes
     kernel_count: int  # Number of kernels in the kpack
@@ -51,7 +53,12 @@ class KpackInfo:
 class FileClassificationVisitor:
     """Visitor that accumulates file classification results during tree scanning."""
 
-    def __init__(self, toolchain: Toolchain, database_handlers: Optional[List[DatabaseHandler]] = None, verbose: bool = False):
+    def __init__(
+        self,
+        toolchain: Toolchain,
+        database_handlers: Optional[List[DatabaseHandler]] = None,
+        verbose: bool = False,
+    ):
         """
         Initialize the classification visitor.
 
@@ -66,7 +73,9 @@ class FileClassificationVisitor:
 
         # Accumulated results
         self.fat_binaries: List[Path] = []
-        self.database_files_by_arch: Dict[str, List[Tuple[Path, DatabaseHandler]]] = defaultdict(list)
+        self.database_files_by_arch: Dict[
+            str, List[Tuple[Path, DatabaseHandler]]
+        ] = defaultdict(list)
         self.exclude_from_generic: Set[Path] = set()
 
     def visit_file(self, file_path: Path, prefix_path: Path) -> None:
@@ -94,21 +103,33 @@ class FileClassificationVisitor:
                 self.database_files_by_arch[arch].append((file_path, handler))
                 self.exclude_from_generic.add(file_path)
                 if self.verbose:
-                    print(f"  Found {handler.name()} database file for {arch}: {file_path.relative_to(prefix_path)}")
+                    print(
+                        f"  Found {handler.name()} database file for {arch}: {file_path.relative_to(prefix_path)}"
+                    )
                 break  # First matching handler wins
 
     def get_statistics(self) -> str:
         """Get a summary of classification results."""
-        total_db_files = sum(len(files) for files in self.database_files_by_arch.values())
-        return (f"  Total: {len(self.fat_binaries)} fat binaries, "
-                f"{total_db_files} database files, "
-                f"{len(self.exclude_from_generic)} files to exclude from generic")
+        total_db_files = sum(
+            len(files) for files in self.database_files_by_arch.values()
+        )
+        return (
+            f"  Total: {len(self.fat_binaries)} fat binaries, "
+            f"{total_db_files} database files, "
+            f"{len(self.exclude_from_generic)} files to exclude from generic"
+        )
 
 
 class GenericCopyVisitor:
     """Visitor that copies files to generic artifact, excluding marked files."""
 
-    def __init__(self, exclude_files: Set[Path], source_prefix: Path, dest_prefix: Path, verbose: bool = False):
+    def __init__(
+        self,
+        exclude_files: Set[Path],
+        source_prefix: Path,
+        dest_prefix: Path,
+        verbose: bool = False,
+    ):
         """
         Initialize the copy visitor.
 
@@ -152,15 +173,21 @@ class GenericCopyVisitor:
 
     def get_statistics(self) -> str:
         """Get a summary of copy results."""
-        return f"  Copied {self.copied_count} files, excluded {self.excluded_count} files"
+        return (
+            f"  Copied {self.copied_count} files, excluded {self.excluded_count} files"
+        )
 
 
 class ArtifactSplitter:
     """Splits TheRock artifacts into generic and architecture-specific components."""
 
-    def __init__(self, artifact_prefix: str, toolchain: Toolchain,
-                 database_handlers: Optional[List[DatabaseHandler]] = None,
-                 verbose: bool = False):
+    def __init__(
+        self,
+        artifact_prefix: str,
+        toolchain: Toolchain,
+        database_handlers: Optional[List[DatabaseHandler]] = None,
+        verbose: bool = False,
+    ):
         """
         Initialize the artifact splitter.
 
@@ -175,8 +202,9 @@ class ArtifactSplitter:
         self.database_handlers = database_handlers or []
         self.verbose = verbose
 
-
-    def compute_manifest_relative_path(self, binary_path: Path, prefix_root: Path) -> str:
+    def compute_manifest_relative_path(
+        self, binary_path: Path, prefix_root: Path
+    ) -> str:
         """
         Compute the relative path from a binary to its kpack manifest.
 
@@ -208,7 +236,9 @@ class ArtifactSplitter:
 
         return manifest_path
 
-    def scan_prefix(self, prefix_path: Path, visitor: FileClassificationVisitor) -> None:
+    def scan_prefix(
+        self, prefix_path: Path, visitor: FileClassificationVisitor
+    ) -> None:
         """
         Scan a prefix directory and classify files using the visitor.
 
@@ -227,7 +257,9 @@ class ArtifactSplitter:
         if self.verbose:
             print(visitor.get_statistics())
 
-    def copy_generic_artifact(self, prefix_path: Path, dest_prefix: Path, exclude_files: Set[Path]) -> None:
+    def copy_generic_artifact(
+        self, prefix_path: Path, dest_prefix: Path, exclude_files: Set[Path]
+    ) -> None:
         """
         Copy files to generic artifact, excluding marked files.
 
@@ -239,7 +271,9 @@ class ArtifactSplitter:
         if self.verbose:
             print(f"  Creating generic artifact (excluding {len(exclude_files)} files)")
 
-        copy_visitor = GenericCopyVisitor(exclude_files, prefix_path, dest_prefix, self.verbose)
+        copy_visitor = GenericCopyVisitor(
+            exclude_files, prefix_path, dest_prefix, self.verbose
+        )
 
         # Walk through all files and copy non-excluded ones using robust traversal
         for file_path, direntry in scan_directory(prefix_path):
@@ -249,7 +283,9 @@ class ArtifactSplitter:
         if self.verbose:
             print(copy_visitor.get_statistics())
 
-    def process_fat_binaries(self, fat_binaries: List[Path], prefix: str, prefix_path: Path) -> Dict[str, List[ExtractedKernel]]:
+    def process_fat_binaries(
+        self, fat_binaries: List[Path], prefix: str, prefix_path: Path
+    ) -> Dict[str, List[ExtractedKernel]]:
         """
         Process fat binaries to extract device code.
 
@@ -285,19 +321,24 @@ class ArtifactSplitter:
                         extracted_kernel = ExtractedKernel(
                             target_name=target_name,
                             kernel_data=kernel_data,
-                            source_binary_relpath=str(binary_path.relative_to(prefix_path)),
+                            source_binary_relpath=str(
+                                binary_path.relative_to(prefix_path)
+                            ),
                             source_prefix=prefix,
-                            architecture=arch
+                            architecture=arch,
                         )
 
                         kernels_by_arch[arch].append(extracted_kernel)
                         if self.verbose:
-                            print(f"    Extracted kernel for {arch}: {file_name} ({len(kernel_data)} bytes)")
+                            print(
+                                f"    Extracted kernel for {arch}: {file_name} ({len(kernel_data)} bytes)"
+                            )
 
         return kernels_by_arch
 
-
-    def create_kpack_files(self, all_kernels_by_arch: Dict[str, List[ExtractedKernel]], output_dir: Path) -> Dict[str, KpackInfo]:
+    def create_kpack_files(
+        self, all_kernels_by_arch: Dict[str, List[ExtractedKernel]], output_dir: Path
+    ) -> Dict[str, KpackInfo]:
         """
         Create kpack files from all extracted kernels in architecture-specific artifacts.
         Creates a single kpack file per architecture containing kernels from all prefixes.
@@ -315,7 +356,9 @@ class ArtifactSplitter:
         kpack_info_by_arch = {}
 
         if self.verbose:
-            print(f"\nCreating kpack files for {len(all_kernels_by_arch)} architectures")
+            print(
+                f"\nCreating kpack files for {len(all_kernels_by_arch)} architectures"
+            )
 
         # Process each architecture
         for arch, kernel_list in all_kernels_by_arch.items():
@@ -328,7 +371,9 @@ class ArtifactSplitter:
                 kernels_by_prefix[kernel.source_prefix] += 1
 
             if self.verbose:
-                print(f"  Creating kpack for {arch} with {len(kernel_list)} kernels total")
+                print(
+                    f"  Creating kpack for {arch} with {len(kernel_list)} kernels total"
+                )
                 for prefix, count in kernels_by_prefix.items():
                     print(f"    - {count} kernels from {prefix}")
 
@@ -352,7 +397,7 @@ class ArtifactSplitter:
             archive = PackedKernelArchive(
                 group_name=self.artifact_prefix,
                 gfx_arch_family=arch,  # Use specific arch, not family
-                gfx_arches=[arch]
+                gfx_arches=[arch],
             )
 
             # Add kernels to archive
@@ -366,7 +411,10 @@ class ArtifactSplitter:
                     relative_path=relative_path,
                     gfx_arch=kernel.architecture,
                     hsaco_data=kernel.kernel_data,
-                    metadata={"target": kernel.target_name, "source_prefix": kernel.source_prefix}
+                    metadata={
+                        "target": kernel.target_name,
+                        "source_prefix": kernel.source_prefix,
+                    },
                 )
                 archive.add_kernel(prepared)
 
@@ -384,9 +432,7 @@ class ArtifactSplitter:
 
             kernel_count = len(kernel_list)
             kpack_info_by_arch[arch] = KpackInfo(
-                kpack_path=kpack_file,
-                size=kpack_size,
-                kernel_count=kernel_count
+                kpack_path=kpack_file, size=kpack_size, kernel_count=kernel_count
             )
 
             if self.verbose:
@@ -398,7 +444,7 @@ class ArtifactSplitter:
             manifest_path = arch_artifact_dir / "artifact_manifest.txt"
             existing_prefixes = []
             if manifest_path.exists():
-                with open(manifest_path, 'r') as f:
+                with open(manifest_path, "r") as f:
                     existing_prefixes = [line.strip() for line in f if line.strip()]
 
             # Add kpack prefix if not already present
@@ -408,8 +454,12 @@ class ArtifactSplitter:
 
         return kpack_info_by_arch
 
-    def inject_kpack_references(self, fat_binaries_by_prefix: Dict[str, List[Path]],
-                                generic_artifact_dir: Path, kpack_info_by_arch: Dict[str, KpackInfo]):
+    def inject_kpack_references(
+        self,
+        fat_binaries_by_prefix: Dict[str, List[Path]],
+        generic_artifact_dir: Path,
+        kpack_info_by_arch: Dict[str, KpackInfo],
+    ):
         """
         Inject kpack manifest references into fat binaries and strip device code.
 
@@ -436,22 +486,24 @@ class ArtifactSplitter:
                 "format_version": 1,
                 "component_name": self.artifact_prefix,
                 "prefix": prefix,  # The prefix this manifest belongs to
-                "kpack_files": {}
+                "kpack_files": {},
             }
 
             # Add entries for each architecture with size and kernel count info
             for arch in sorted(kpack_info_by_arch.keys()):
                 kpack_info = kpack_info_by_arch[arch]
-                kpack_filename = kpack_info.kpack_path.name  # Just the filename, not full path
+                kpack_filename = (
+                    kpack_info.kpack_path.name
+                )  # Just the filename, not full path
 
                 manifest_data["kpack_files"][arch] = {
                     "file": kpack_filename,
                     "size": kpack_info.size,
-                    "kernel_count": kpack_info.kernel_count
+                    "kernel_count": kpack_info.kernel_count,
                 }
 
             # Write the manifest
-            with open(manifest_path, 'wb') as f:
+            with open(manifest_path, "wb") as f:
                 msgpack.pack(manifest_data, f)
 
             # Validate manifest was created
@@ -461,19 +513,25 @@ class ArtifactSplitter:
                 raise RuntimeError(f"Manifest file is empty: {manifest_path}")
 
             if self.verbose:
-                print(f"  Created manifest: {manifest_path.relative_to(generic_artifact_dir)}")
+                print(
+                    f"  Created manifest: {manifest_path.relative_to(generic_artifact_dir)}"
+                )
 
             # Now inject references to this manifest in each binary
             for binary_path in binary_paths:
                 # Compute relative path from binary to the manifest using existing method
-                manifest_relpath = self.compute_manifest_relative_path(binary_path, prefix_dir)
+                manifest_relpath = self.compute_manifest_relative_path(
+                    binary_path, prefix_dir
+                )
 
                 if self.verbose:
-                    print(f"  Processing {binary_path.relative_to(generic_artifact_dir)}")
+                    print(
+                        f"  Processing {binary_path.relative_to(generic_artifact_dir)}"
+                    )
                     print(f"    Manifest path: {manifest_relpath}")
 
                 # Create temporary file for marked binary
-                temp_marked = binary_path.with_suffix(binary_path.suffix + '.marked')
+                temp_marked = binary_path.with_suffix(binary_path.suffix + ".marked")
 
                 # Record original size for validation
                 original_size = binary_path.stat().st_size
@@ -487,7 +545,7 @@ class ArtifactSplitter:
                         output_path=temp_marked,
                         kpack_search_paths=[manifest_relpath],  # Manifest path
                         kernel_name=self.artifact_prefix,  # Component name instead of binary path
-                        toolchain=self.toolchain
+                        toolchain=self.toolchain,
                     )
 
                     # Transform binary to strip device code
@@ -495,12 +553,14 @@ class ArtifactSplitter:
                         input_path=temp_marked,
                         output_path=binary_path,  # Overwrite original
                         toolchain=self.toolchain,
-                        verbose=self.verbose
+                        verbose=self.verbose,
                     )
 
                     # Validate stripping succeeded
                     if not binary_path.exists():
-                        raise RuntimeError(f"Binary disappeared after stripping: {binary_path}")
+                        raise RuntimeError(
+                            f"Binary disappeared after stripping: {binary_path}"
+                        )
 
                     new_size = binary_path.stat().st_size
                     if new_size >= original_size:
@@ -517,9 +577,13 @@ class ArtifactSplitter:
                     if temp_marked.exists():
                         temp_marked.unlink()
 
-
-    def process_database_files(self, database_files_by_arch: Dict[str, List[Tuple[Path, DatabaseHandler]]],
-                              prefix: str, prefix_path: Path, output_dir: Path):
+    def process_database_files(
+        self,
+        database_files_by_arch: Dict[str, List[Tuple[Path, DatabaseHandler]]],
+        prefix: str,
+        prefix_path: Path,
+        output_dir: Path,
+    ):
         """
         Move kernel database files to architecture-specific artifacts.
 
@@ -536,7 +600,9 @@ class ArtifactSplitter:
             arch_prefix_dir = arch_artifact_dir / prefix
 
             if self.verbose:
-                print(f"  Moving {len(file_handler_pairs)} database files to {arch_artifact_name}")
+                print(
+                    f"  Moving {len(file_handler_pairs)} database files to {arch_artifact_name}"
+                )
 
             for file_path, handler in file_handler_pairs:
                 # Compute destination path preserving structure
@@ -555,7 +621,7 @@ class ArtifactSplitter:
             manifest_path = arch_artifact_dir / "artifact_manifest.txt"
             existing_prefixes = []
             if manifest_path.exists():
-                with open(manifest_path, 'r') as f:
+                with open(manifest_path, "r") as f:
                     existing_prefixes = [line.strip() for line in f if line.strip()]
 
             # Add current prefix if not already present
@@ -607,7 +673,9 @@ class ArtifactSplitter:
                 print(f"\nProcessing prefix: {prefix}")
 
             # Phase 1: Classify files using visitor
-            classifier = FileClassificationVisitor(self.toolchain, self.database_handlers, self.verbose)
+            classifier = FileClassificationVisitor(
+                self.toolchain, self.database_handlers, self.verbose
+            )
             self.scan_prefix(prefix_path, classifier)
 
             # Phase 2: Process database files (move to arch-specific artifacts)
@@ -625,7 +693,9 @@ class ArtifactSplitter:
                 print(f"Creating generic artifact: {generic_artifact_name}")
 
             # Copy files excluding those marked for exclusion
-            self.copy_generic_artifact(prefix_path, generic_prefix_dir, classifier.exclude_from_generic)
+            self.copy_generic_artifact(
+                prefix_path, generic_prefix_dir, classifier.exclude_from_generic
+            )
 
             # Write artifact manifest for generic artifact
             if not generic_artifact_dir.exists():
@@ -645,7 +715,9 @@ class ArtifactSplitter:
                 # Track fat binaries in the generic artifact for later processing
                 fat_binaries_in_generic = []
                 for binary_path in classifier.fat_binaries:
-                    generic_binary_path = generic_prefix_dir / binary_path.relative_to(prefix_path)
+                    generic_binary_path = generic_prefix_dir / binary_path.relative_to(
+                        prefix_path
+                    )
                     if generic_binary_path.exists():
                         fat_binaries_in_generic.append(generic_binary_path)
 
@@ -655,7 +727,9 @@ class ArtifactSplitter:
         # Phase 5: Create kpack files from all accumulated kernels
         kpack_info_by_arch = {}
         if all_kernels_by_arch:
-            kpack_info_by_arch = self.create_kpack_files(all_kernels_by_arch, output_dir)
+            kpack_info_by_arch = self.create_kpack_files(
+                all_kernels_by_arch, output_dir
+            )
 
         # Phase 6: Inject kpack references and strip device code from fat binaries
         if fat_binaries_by_prefix and kpack_info_by_arch:

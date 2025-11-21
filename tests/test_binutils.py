@@ -19,10 +19,14 @@ def test_toolchain(test_assets_dir: Path, toolchain: binutils.Toolchain):
             raise AssertionError("No target hsaco file")
 
 
-def test_kpack_ref_marker_roundtrip(tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path):
+def test_kpack_ref_marker_roundtrip(
+    tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path
+):
     """Test adding and reading back a kpack ref marker."""
     # Use a real bundled binary from test assets
-    source_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    source_binary = (
+        test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    )
     marked_binary = tmp_path / "marked_binary.exe"
 
     # Add marker
@@ -48,7 +52,9 @@ def test_kpack_ref_marker_roundtrip(tmp_path: Path, toolchain: binutils.Toolchai
     assert marker_data["kernel_name"] == kernel_name
 
 
-def test_kpack_ref_marker_with_host_only_binary(tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path):
+def test_kpack_ref_marker_with_host_only_binary(
+    tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path
+):
     """Test adding marker to host-only binary (no .hip_fatbin section)."""
     source_binary = test_assets_dir / "bundled_binaries/linux/cov5/host_only.exe"
     marked_binary = tmp_path / "marked_host_only.exe"
@@ -69,9 +75,13 @@ def test_kpack_ref_marker_with_host_only_binary(tmp_path: Path, toolchain: binut
     assert marker_data["kernel_name"] == "bin/host_only.exe"
 
 
-def test_kpack_ref_marker_with_shared_library(tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path):
+def test_kpack_ref_marker_with_shared_library(
+    tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path
+):
     """Test adding marker to shared library."""
-    source_binary = test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_single.so"
+    source_binary = (
+        test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_single.so"
+    )
     marked_binary = tmp_path / "marked_library.so"
 
     # Add marker
@@ -89,9 +99,13 @@ def test_kpack_ref_marker_with_shared_library(tmp_path: Path, toolchain: binutil
     assert marker_data["kernel_name"] == "lib/libtest_kernel_single.so"
 
 
-def test_kpack_ref_marker_multiple_search_paths(tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path):
+def test_kpack_ref_marker_multiple_search_paths(
+    tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path
+):
     """Test marker with multiple kpack search paths."""
-    source_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    source_binary = (
+        test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    )
     marked_binary = tmp_path / "multi_search.exe"
 
     # Multiple search paths for different architecture families
@@ -115,19 +129,27 @@ def test_kpack_ref_marker_multiple_search_paths(tmp_path: Path, toolchain: binut
     assert marker_data["kpack_search_paths"] == kpack_paths
 
 
-def test_read_kpack_ref_marker_no_section(tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path):
+def test_read_kpack_ref_marker_no_section(
+    tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path
+):
     """Test reading marker from binary without .rocm_kpack_ref section."""
     # Use unmarked binary
-    source_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    source_binary = (
+        test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    )
 
     # Should return None for binaries without marker
     marker_data = binutils.read_kpack_ref_marker(source_binary, toolchain=toolchain)
     assert marker_data is None
 
 
-def test_kpack_ref_marker_preserves_sections(tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path):
+def test_kpack_ref_marker_preserves_sections(
+    tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path
+):
     """Test that adding marker preserves existing sections like .hip_fatbin."""
-    source_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    source_binary = (
+        test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    )
     marked_binary = tmp_path / "preserve_sections.exe"
 
     # Verify source has .hip_fatbin section
@@ -135,7 +157,7 @@ def test_kpack_ref_marker_preserves_sections(tmp_path: Path, toolchain: binutils
         [str(toolchain.readelf), "-S", str(source_binary)],
         capture_output=True,
         text=True,
-        check=True
+        check=True,
     )
     assert ".hip_fatbin" in result.stdout
 
@@ -153,15 +175,23 @@ def test_kpack_ref_marker_preserves_sections(tmp_path: Path, toolchain: binutils
         [str(toolchain.readelf), "-S", str(marked_binary)],
         capture_output=True,
         text=True,
-        check=True
+        check=True,
     )
-    assert ".hip_fatbin" in result.stdout, "Original .hip_fatbin section should be preserved"
-    assert ".rocm_kpack_ref" in result.stdout, "New .rocm_kpack_ref section should exist"
+    assert (
+        ".hip_fatbin" in result.stdout
+    ), "Original .hip_fatbin section should be preserved"
+    assert (
+        ".rocm_kpack_ref" in result.stdout
+    ), "New .rocm_kpack_ref section should exist"
 
 
-def test_kpack_ref_marker_special_characters_in_paths(tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path):
+def test_kpack_ref_marker_special_characters_in_paths(
+    tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path
+):
     """Test marker with special characters in paths."""
-    source_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    source_binary = (
+        test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    )
     marked_binary = tmp_path / "special_chars.exe"
 
     # Paths with special characters
@@ -184,10 +214,14 @@ def test_kpack_ref_marker_special_characters_in_paths(tmp_path: Path, toolchain:
     assert marker_data["kernel_name"] == "bin/my-binary_v2.exe"
 
 
-def test_kpack_ref_marker_overwrite_output(tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path):
+def test_kpack_ref_marker_overwrite_output(
+    tmp_path: Path, toolchain: binutils.Toolchain, test_assets_dir: Path
+):
     """Test that output path can be the same as input (in-place modification)."""
     # Copy source to temp location first
-    source_binary = test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    source_binary = (
+        test_assets_dir / "bundled_binaries/linux/cov5/test_kernel_multi.exe"
+    )
     test_binary = tmp_path / "test_inplace.exe"
     shutil.copy2(source_binary, test_binary)
 

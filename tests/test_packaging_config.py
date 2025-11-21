@@ -18,8 +18,7 @@ class TestArchitectureGroup:
     def test_create_valid_group(self):
         """Test creating a valid architecture group."""
         group = ArchitectureGroup(
-            display_name="ROCm gfx110X",
-            architectures=["gfx1100", "gfx1101", "gfx1102"]
+            display_name="ROCm gfx110X", architectures=["gfx1100", "gfx1101", "gfx1102"]
         )
 
         assert group.display_name == "ROCm gfx110X"
@@ -28,18 +27,12 @@ class TestArchitectureGroup:
     def test_empty_architectures_raises(self):
         """Test that empty architectures list raises error."""
         with pytest.raises(ValueError, match="must have at least one architecture"):
-            ArchitectureGroup(
-                display_name="Empty Group",
-                architectures=[]
-            )
+            ArchitectureGroup(display_name="Empty Group", architectures=[])
 
     def test_invalid_architecture_format_raises(self):
         """Test that invalid architecture format raises error."""
         with pytest.raises(ValueError, match="must start with 'gfx'"):
-            ArchitectureGroup(
-                display_name="Invalid",
-                architectures=["invalid"]
-            )
+            ArchitectureGroup(display_name="Invalid", architectures=["invalid"])
 
 
 class TestPackagingConfig:
@@ -53,18 +46,18 @@ class TestPackagingConfig:
             "architecture_groups": {
                 "gfx110X": {
                     "display_name": "ROCm gfx110X",
-                    "architectures": ["gfx1100", "gfx1101", "gfx1102"]
+                    "architectures": ["gfx1100", "gfx1101", "gfx1102"],
                 },
                 "gfx115X": {
                     "display_name": "ROCm gfx115X",
-                    "architectures": ["gfx1150", "gfx1151"]
-                }
+                    "architectures": ["gfx1150", "gfx1151"],
+                },
             },
             "validation": {
                 "error_on_duplicate_device_code": True,
                 "verify_generic_artifacts_match": False,
-                "error_on_missing_architecture": False
-            }
+                "error_on_missing_architecture": False,
+            },
         }
 
     def test_from_json_valid(self, tmp_path, sample_config_dict):
@@ -133,4 +126,7 @@ class TestPackagingConfig:
         # Compare
         assert config2.primary_shard == config1.primary_shard
         assert config2.architecture_groups.keys() == config1.architecture_groups.keys()
-        assert config2.validation.error_on_duplicate_device_code == config1.validation.error_on_duplicate_device_code
+        assert (
+            config2.validation.error_on_duplicate_device_code
+            == config1.validation.error_on_duplicate_device_code
+        )

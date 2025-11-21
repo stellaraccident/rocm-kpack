@@ -19,12 +19,16 @@ class ArchitectureGroup:
 
     def __post_init__(self):
         if not self.architectures:
-            raise ValueError(f"Architecture group '{self.display_name}' must have at least one architecture")
+            raise ValueError(
+                f"Architecture group '{self.display_name}' must have at least one architecture"
+            )
 
         # Validate architecture format (gfxXXXX)
         for arch in self.architectures:
             if not arch.startswith("gfx"):
-                raise ValueError(f"Invalid architecture '{arch}': must start with 'gfx'")
+                raise ValueError(
+                    f"Invalid architecture '{arch}': must start with 'gfx'"
+                )
 
 
 @dataclass
@@ -83,7 +87,9 @@ class PackagingConfig:
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in {json_path}: {e}") from e
         except OSError as e:
-            raise RuntimeError(f"Cannot read configuration file {json_path}: {e}") from e
+            raise RuntimeError(
+                f"Cannot read configuration file {json_path}: {e}"
+            ) from e
 
         # Parse architecture groups
         groups = {}
@@ -95,17 +101,20 @@ class PackagingConfig:
                 raise ValueError(f"Architecture group '{group_name}' must be an object")
 
             if "architectures" not in group_data:
-                raise ValueError(f"Architecture group '{group_name}' missing 'architectures' field")
+                raise ValueError(
+                    f"Architecture group '{group_name}' missing 'architectures' field"
+                )
 
             display_name = group_data.get("display_name", group_name)
             architectures = group_data["architectures"]
 
             if not isinstance(architectures, list):
-                raise ValueError(f"Architecture group '{group_name}' architectures must be a list")
+                raise ValueError(
+                    f"Architecture group '{group_name}' architectures must be a list"
+                )
 
             groups[group_name] = ArchitectureGroup(
-                display_name=display_name,
-                architectures=architectures
+                display_name=display_name, architectures=architectures
             )
 
         # Parse validation rules
@@ -116,9 +125,15 @@ class PackagingConfig:
                 raise ValueError("'validation' field must be an object")
 
             validation = ValidationRules(
-                error_on_duplicate_device_code=val_data.get("error_on_duplicate_device_code", True),
-                verify_generic_artifacts_match=val_data.get("verify_generic_artifacts_match", False),
-                error_on_missing_architecture=val_data.get("error_on_missing_architecture", False)
+                error_on_duplicate_device_code=val_data.get(
+                    "error_on_duplicate_device_code", True
+                ),
+                verify_generic_artifacts_match=val_data.get(
+                    "verify_generic_artifacts_match", False
+                ),
+                error_on_missing_architecture=val_data.get(
+                    "error_on_missing_architecture", False
+                ),
             )
 
         # Get primary shard
@@ -132,7 +147,7 @@ class PackagingConfig:
         return cls(
             primary_shard=primary_shard,
             architecture_groups=groups,
-            validation=validation
+            validation=validation,
         )
 
     def to_json(self, json_path: Path) -> None:
@@ -147,7 +162,7 @@ class PackagingConfig:
         for group_name, group in self.architecture_groups.items():
             groups_dict[group_name] = {
                 "display_name": group.display_name,
-                "architectures": group.architectures
+                "architectures": group.architectures,
             }
 
         data = {
@@ -156,8 +171,8 @@ class PackagingConfig:
             "validation": {
                 "error_on_duplicate_device_code": self.validation.error_on_duplicate_device_code,
                 "verify_generic_artifacts_match": self.validation.verify_generic_artifacts_match,
-                "error_on_missing_architecture": self.validation.error_on_missing_architecture
-            }
+                "error_on_missing_architecture": self.validation.error_on_missing_architecture,
+            },
         }
 
         with open(json_path, "w") as f:

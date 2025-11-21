@@ -20,6 +20,7 @@ class TestRecombineIntegration:
     @pytest.fixture
     def create_split_artifacts(self, tmp_path):
         """Create mock split artifacts in shard structure for testing."""
+
         def _create(component_name: str, shard_configs: dict[str, list[str]]):
             """
             Create split artifacts across multiple shards.
@@ -49,7 +50,9 @@ class TestRecombineIntegration:
                 lib_dir.mkdir(parents=True)
 
                 # Create a mock library file
-                (lib_dir / f"lib{component_name}.so").write_text(f"Mock library content from {shard_name}")
+                (lib_dir / f"lib{component_name}.so").write_text(
+                    f"Mock library content from {shard_name}"
+                )
 
                 # Create .kpack directory for manifests
                 kpack_dir = prefix_dir / ".kpack"
@@ -69,7 +72,9 @@ class TestRecombineIntegration:
 
                     # Create mock kpack file
                     kpack_file = arch_kpack_dir / f"{component_name}_{arch}.kpack"
-                    kpack_file.write_text(f"Mock kpack data for {arch} from {shard_name}")
+                    kpack_file.write_text(
+                        f"Mock kpack data for {arch} from {shard_name}"
+                    )
 
                     # Create mock manifest for this architecture
                     manifest_data = {
@@ -79,20 +84,24 @@ class TestRecombineIntegration:
                         "kpack_files": {
                             arch: {
                                 "file": f"{component_name}_{arch}.kpack",
-                                "size": len(f"Mock kpack data for {arch} from {shard_name}"),
-                                "kernel_count": 5
+                                "size": len(
+                                    f"Mock kpack data for {arch} from {shard_name}"
+                                ),
+                                "kernel_count": 5,
                             }
-                        }
+                        },
                     }
 
                     manifest_path = arch_kpack_dir / f"{component_name}.kpm"
-                    with open(manifest_path, 'wb') as f:
+                    with open(manifest_path, "wb") as f:
                         msgpack.pack(manifest_data, f)
 
                     # Create mock database file (architecture-specific)
                     db_dir = arch_prefix_dir / "lib" / "rocblas" / "library"
                     db_dir.mkdir(parents=True, exist_ok=True)
-                    (db_dir / f"TensileLibrary_{arch}.dat").write_text(f"Mock database for {arch} from {shard_name}")
+                    (db_dir / f"TensileLibrary_{arch}.dat").write_text(
+                        f"Mock database for {arch} from {shard_name}"
+                    )
 
             return shards_dir
 
@@ -106,14 +115,14 @@ class TestRecombineIntegration:
             "architecture_groups": {
                 "gfx110X": {
                     "display_name": "ROCm gfx110X",
-                    "architectures": ["gfx1100", "gfx1101", "gfx1102"]
+                    "architectures": ["gfx1100", "gfx1101", "gfx1102"],
                 }
             },
             "validation": {
                 "error_on_duplicate_device_code": True,
                 "verify_generic_artifacts_match": False,
-                "error_on_missing_architecture": False
-            }
+                "error_on_missing_architecture": False,
+            },
         }
 
         config_file = tmp_path / "config.json"
@@ -125,11 +134,7 @@ class TestRecombineIntegration:
     def test_collect_split_artifacts(self, create_split_artifacts):
         """Test collecting split artifacts from multiple shards."""
         shards_dir = create_split_artifacts(
-            "test_lib",
-            {
-                "shard1": ["gfx1100", "gfx1101"],
-                "shard2": ["gfx1102"]
-            }
+            "test_lib", {"shard1": ["gfx1100", "gfx1101"], "shard2": ["gfx1102"]}
         )
 
         collector = ArtifactCollector(shards_dir, "shard1", verbose=False)
@@ -163,14 +168,13 @@ class TestRecombineIntegration:
         """Test recombining artifacts into separate generic and arch-specific packages."""
         # Create split artifacts across shards
         shards_dir = create_split_artifacts(
-            "test_lib",
-            {
-                "shard1": ["gfx1100", "gfx1101", "gfx1102"]
-            }
+            "test_lib", {"shard1": ["gfx1100", "gfx1101", "gfx1102"]}
         )
 
         # Collect artifacts
-        collector = ArtifactCollector(shards_dir, sample_config.primary_shard, verbose=False)
+        collector = ArtifactCollector(
+            shards_dir, sample_config.primary_shard, verbose=False
+        )
         collector.collect()
 
         # Create combiner
@@ -198,7 +202,9 @@ class TestRecombineIntegration:
 
         # Verify generic artifact does NOT have .kpack directory
         generic_kpack_dir = generic_artifact / "test/lib/stage/.kpack"
-        assert not generic_kpack_dir.exists(), "Generic artifact should not contain .kpack directory"
+        assert (
+            not generic_kpack_dir.exists()
+        ), "Generic artifact should not contain .kpack directory"
 
         # Verify ARCH-SPECIFIC artifact was created
         arch_artifact = output_dir / "test_lib_gfx110X"
@@ -210,11 +216,15 @@ class TestRecombineIntegration:
 
         # Verify arch artifact does NOT have host code
         arch_lib_file = arch_artifact / "test/lib/stage/lib/libtest_lib.so"
-        assert not arch_lib_file.exists(), "Arch-specific artifact should not contain host library"
+        assert (
+            not arch_lib_file.exists()
+        ), "Arch-specific artifact should not contain host library"
 
         # Verify arch artifact HAS .kpack files
         arch_kpack_dir = arch_artifact / "test/lib/stage/.kpack"
-        assert arch_kpack_dir.exists(), "Arch-specific artifact missing .kpack directory"
+        assert (
+            arch_kpack_dir.exists()
+        ), "Arch-specific artifact missing .kpack directory"
 
         for arch in ["gfx1100", "gfx1101", "gfx1102"]:
             kpack_file = arch_kpack_dir / f"test_lib_{arch}.kpack"
@@ -225,7 +235,7 @@ class TestRecombineIntegration:
         assert kpm_manifest.exists(), "Missing .kpm manifest in arch artifact"
 
         # Read and verify manifest
-        with open(kpm_manifest, 'rb') as f:
+        with open(kpm_manifest, "rb") as f:
             manifest_data = msgpack.unpack(f, raw=False)
 
         assert manifest_data["format_version"] == 1
@@ -237,20 +247,25 @@ class TestRecombineIntegration:
 
         # Verify architecture-specific database files in arch artifact
         for arch in ["gfx1100", "gfx1101", "gfx1102"]:
-            db_file = arch_artifact / "test/lib/stage/lib/rocblas/library" / f"TensileLibrary_{arch}.dat"
+            db_file = (
+                arch_artifact
+                / "test/lib/stage/lib/rocblas/library"
+                / f"TensileLibrary_{arch}.dat"
+            )
             assert db_file.exists(), f"Missing database file for {arch}"
 
-    def test_recombine_missing_architecture(self, tmp_path, create_split_artifacts, sample_config):
+    def test_recombine_missing_architecture(
+        self, tmp_path, create_split_artifacts, sample_config
+    ):
         """Test recombining when some architectures are missing."""
         # Create split artifacts with only 2 of 3 architectures
         shards_dir = create_split_artifacts(
-            "test_lib",
-            {
-                "shard1": ["gfx1100", "gfx1101"]
-            }
+            "test_lib", {"shard1": ["gfx1100", "gfx1101"]}
         )
 
-        collector = ArtifactCollector(shards_dir, sample_config.primary_shard, verbose=False)
+        collector = ArtifactCollector(
+            shards_dir, sample_config.primary_shard, verbose=False
+        )
         collector.collect()
 
         manifest_merger = ManifestMerger(verbose=False)
@@ -274,7 +289,7 @@ class TestRecombineIntegration:
 
         # Verify manifest has only 2 architectures
         manifest = kpack_dir / "test_lib.kpm"
-        with open(manifest, 'rb') as f:
+        with open(manifest, "rb") as f:
             manifest_data = msgpack.unpack(f, raw=False)
 
         assert len(manifest_data["kpack_files"]) == 2
@@ -290,18 +305,18 @@ class TestRecombineIntegration:
             "architecture_groups": {
                 "gfx110X": {
                     "display_name": "ROCm gfx110X",
-                    "architectures": ["gfx1100", "gfx1101"]
+                    "architectures": ["gfx1100", "gfx1101"],
                 },
                 "gfx115X": {
                     "display_name": "ROCm gfx115X",
-                    "architectures": ["gfx1151"]
-                }
+                    "architectures": ["gfx1151"],
+                },
             },
             "validation": {
                 "error_on_duplicate_device_code": True,
                 "verify_generic_artifacts_match": False,
-                "error_on_missing_architecture": False
-            }
+                "error_on_missing_architecture": False,
+            },
         }
 
         config_file = tmp_path / "config.json"
@@ -312,10 +327,7 @@ class TestRecombineIntegration:
 
         # Create split artifacts with architectures from both groups
         shards_dir = create_split_artifacts(
-            "test_lib",
-            {
-                "shard1": ["gfx1100", "gfx1101", "gfx1151"]
-            }
+            "test_lib", {"shard1": ["gfx1100", "gfx1101", "gfx1151"]}
         )
 
         collector = ArtifactCollector(shards_dir, config.primary_shard, verbose=False)
@@ -355,7 +367,9 @@ class TestRecombineIntegration:
         kpack_files_2 = list(kpack_dir_2.glob("*.kpack"))
         assert len(kpack_files_2) == 1  # gfx1151
 
-    def test_generic_only_component(self, tmp_path, create_split_artifacts, sample_config):
+    def test_generic_only_component(
+        self, tmp_path, create_split_artifacts, sample_config
+    ):
         """Test that generic-only components (no device code) only create generic artifact."""
         # Create a component with only generic artifact, no arch-specific artifacts
         shards_dir = tmp_path / "shards"
@@ -380,7 +394,9 @@ class TestRecombineIntegration:
         (lib_dir / "libsupport.a").write_text("Mock static library")
 
         # Collect artifacts
-        collector = ArtifactCollector(shards_dir, sample_config.primary_shard, verbose=False)
+        collector = ArtifactCollector(
+            shards_dir, sample_config.primary_shard, verbose=False
+        )
         collector.collect()
 
         # Create combiner
@@ -400,7 +416,9 @@ class TestRecombineIntegration:
 
         # Verify NO arch-specific artifact was created
         arch_artifact = output_dir / f"{component_name}_gfx110X"
-        assert not arch_artifact.exists(), "Arch-specific artifact should not be created for generic-only component"
+        assert (
+            not arch_artifact.exists()
+        ), "Arch-specific artifact should not be created for generic-only component"
 
         # Verify generic artifact has host code
         lib_file = generic_artifact / prefix / "lib/libsupport.a"
@@ -409,27 +427,20 @@ class TestRecombineIntegration:
     def test_collector_validates_availability(self, create_split_artifacts):
         """Test collector validation of architecture availability."""
         shards_dir = create_split_artifacts(
-            "test_lib",
-            {
-                "shard1": ["gfx1100", "gfx1101"]
-            }
+            "test_lib", {"shard1": ["gfx1100", "gfx1101"]}
         )
 
         collector = ArtifactCollector(shards_dir, "shard1", verbose=False)
         collector.collect()
 
         # Test with all available
-        result = collector.validate_availability(
-            "test_lib",
-            ["gfx1100", "gfx1101"]
-        )
+        result = collector.validate_availability("test_lib", ["gfx1100", "gfx1101"])
         assert result.available == ["gfx1100", "gfx1101"]
         assert result.missing == []
 
         # Test with some missing
         result = collector.validate_availability(
-            "test_lib",
-            ["gfx1100", "gfx1101", "gfx1102"]
+            "test_lib", ["gfx1100", "gfx1101", "gfx1102"]
         )
         assert set(result.available) == {"gfx1100", "gfx1101"}
         assert result.missing == ["gfx1102"]
@@ -450,7 +461,9 @@ class TestRecombineIntegration:
         collector = ArtifactCollector(shards_dir, "shard1", verbose=False)
 
         # Should raise during collection since primary shard has no generics
-        with pytest.raises(ValueError, match="No generic artifacts found in primary shard"):
+        with pytest.raises(
+            ValueError, match="No generic artifacts found in primary shard"
+        ):
             collector.collect()
 
     def test_collector_duplicate_artifacts_raises(self, tmp_path):
@@ -483,4 +496,6 @@ class TestRecombineIntegration:
         # Now try to collect - but they have different names so won't be detected as duplicates
         # The real duplicate case is when two directories have the exact same name
         # which isn't possible in filesystem. Skip this test for now.
-        pytest.skip("Duplicate directory names not possible in filesystem; test scenario invalid")
+        pytest.skip(
+            "Duplicate directory names not possible in filesystem; test scenario invalid"
+        )

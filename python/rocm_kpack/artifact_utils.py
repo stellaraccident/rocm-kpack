@@ -39,7 +39,7 @@ def read_artifact_manifest(artifact_dir: Path) -> list[str]:
     if not manifest_path.exists():
         raise FileNotFoundError(f"artifact_manifest.txt not found in {artifact_dir}")
 
-    with open(manifest_path, 'r') as f:
+    with open(manifest_path, "r") as f:
         return [line.strip() for line in f if line.strip()]
 
 
@@ -52,13 +52,14 @@ def write_artifact_manifest(artifact_dir: Path, prefixes: list[str]) -> None:
         prefixes: List of prefix paths to write
     """
     manifest_path = artifact_dir / "artifact_manifest.txt"
-    with open(manifest_path, 'w') as f:
+    with open(manifest_path, "w") as f:
         for prefix in prefixes:
             f.write(f"{prefix}\n")
 
 
-def scan_directory(root_dir: Path,
-                  predicate: Optional[Callable[[Path, os.DirEntry], bool]] = None) -> Iterator[Tuple[Path, os.DirEntry]]:
+def scan_directory(
+    root_dir: Path, predicate: Optional[Callable[[Path, os.DirEntry], bool]] = None
+) -> Iterator[Tuple[Path, os.DirEntry]]:
     """
     Robustly scan a directory tree without following symlinks.
 
@@ -72,6 +73,7 @@ def scan_directory(root_dir: Path,
     Yields:
         Tuples of (absolute_path, direntry) for each file/directory found
     """
+
     def scan_recursive(current_dir: Path):
         with os.scandir(current_dir) as it:
             for entry in it:
@@ -110,9 +112,9 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
     """
     # Fast check: Is this even an ELF file?
     try:
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             magic = f.read(4)
-            if magic != b'\x7fELF':
+            if magic != b"\x7fELF":
                 return False  # Not an ELF file, definitely not a fat binary
     except FileNotFoundError:
         raise
@@ -124,7 +126,7 @@ def is_fat_binary(file_path: Path, toolchain: Toolchain) -> bool:
         output = subprocess.check_output(
             [str(toolchain.readelf), "-S", str(file_path)],
             stderr=subprocess.STDOUT,
-            text=True
+            text=True,
         )
         return ".hip_fatbin" in output
     except subprocess.CalledProcessError as e:

@@ -26,7 +26,7 @@ class ArtifactCombiner:
         self,
         collector: ArtifactCollector,
         manifest_merger: ManifestMerger,
-        verbose: bool = False
+        verbose: bool = False,
     ):
         """
         Initialize artifact combiner.
@@ -46,7 +46,7 @@ class ArtifactCombiner:
         component_name: str,
         group_name: str,
         arch_group: ArchitectureGroup,
-        output_dir: Path
+        output_dir: Path,
     ) -> None:
         """
         Combine artifacts for a component and architecture group.
@@ -70,13 +70,13 @@ class ArtifactCombiner:
         # Get generic artifact
         generic_artifact = self.collector.get_generic_artifact(component_name)
         if generic_artifact is None:
-            raise ValueError(f"Generic artifact not found for component '{component_name}'")
+            raise ValueError(
+                f"Generic artifact not found for component '{component_name}'"
+            )
 
         # Check which architectures are available
         availability = self.collector.validate_availability(
-            component_name,
-            arch_group.architectures,
-            require_generic=True
+            component_name, arch_group.architectures, require_generic=True
         )
 
         # Determine if this is a generic-only component (no device code)
@@ -104,7 +104,9 @@ class ArtifactCombiner:
         # Skip arch-specific artifact if component has no device code
         if not has_device_code:
             if self.verbose:
-                print(f"  ✓ Generic-only artifact created (no arch-specific artifact needed)")
+                print(
+                    f"  ✓ Generic-only artifact created (no arch-specific artifact needed)"
+                )
             return
 
         # Create architecture-specific artifact for this group
@@ -130,7 +132,7 @@ class ArtifactCombiner:
             sorted(arch_prefixes),
             availability.available,
             component_name,
-            arch_output_dir
+            arch_output_dir,
         )
 
         # Write artifact manifest for arch-specific artifact
@@ -140,9 +142,7 @@ class ArtifactCombiner:
             print(f"  ✓ Artifacts created successfully")
 
     def _create_generic_artifact(
-        self,
-        generic_artifact: CollectedArtifact,
-        output_dir: Path
+        self, generic_artifact: CollectedArtifact, output_dir: Path
     ) -> None:
         """
         Create generic artifact containing only host code (no .kpack files).
@@ -181,19 +181,21 @@ class ArtifactCombiner:
                     f"This indicates a duplicate copy or previous failed run"
                 )
 
-            shutil.copytree(src_prefix, dst_prefix, symlinks=True, ignore=ignore_kpack_dirs)
+            shutil.copytree(
+                src_prefix, dst_prefix, symlinks=True, ignore=ignore_kpack_dirs
+            )
 
             # Validate copy succeeded
             if not dst_prefix.exists():
-                raise RuntimeError(f"Failed to copy generic artifact prefix: {src_prefix} -> {dst_prefix}")
+                raise RuntimeError(
+                    f"Failed to copy generic artifact prefix: {src_prefix} -> {dst_prefix}"
+                )
 
         # Write artifact manifest for generic artifact
         write_artifact_manifest(output_dir, generic_artifact.prefixes)
 
     def _copy_arch_content_only(
-        self,
-        arch_artifact: CollectedArtifact,
-        output_dir: Path
+        self, arch_artifact: CollectedArtifact, output_dir: Path
     ) -> None:
         """
         Copy ONLY architecture-specific content (kpack files and arch databases).
@@ -236,7 +238,9 @@ class ArtifactCombiner:
                     if not dst_kpack_file.exists():
                         raise RuntimeError(f"Failed to copy kpack file: {kpack_file}")
                     if dst_kpack_file.stat().st_size == 0:
-                        raise RuntimeError(f"Kpack file is empty after copy: {dst_kpack_file}")
+                        raise RuntimeError(
+                            f"Kpack file is empty after copy: {dst_kpack_file}"
+                        )
                     if dst_kpack_file.stat().st_size != kpack_file.stat().st_size:
                         raise RuntimeError(
                             f"Kpack file size mismatch after copy: "
@@ -259,7 +263,9 @@ class ArtifactCombiner:
                     if not dst_kpack_file.exists():
                         raise RuntimeError(f"Failed to copy kpack file: {kpack_file}")
                     if dst_kpack_file.stat().st_size == 0:
-                        raise RuntimeError(f"Kpack file is empty after copy: {dst_kpack_file}")
+                        raise RuntimeError(
+                            f"Kpack file is empty after copy: {dst_kpack_file}"
+                        )
                     if dst_kpack_file.stat().st_size != kpack_file.stat().st_size:
                         raise RuntimeError(
                             f"Kpack file size mismatch after copy: "
@@ -295,10 +301,7 @@ class ArtifactCombiner:
         return arch in file_path.name
 
     def _copy_arch_specific_files(
-        self,
-        src_dir: Path,
-        dst_dir: Path,
-        arch: str
+        self, src_dir: Path, dst_dir: Path, arch: str
     ) -> None:
         """
         Copy architecture-specific files (e.g., database files).
@@ -331,7 +334,9 @@ class ArtifactCombiner:
             if not dst_file.exists():
                 raise RuntimeError(f"Failed to copy arch-specific file: {src_file}")
             if dst_file.stat().st_size == 0:
-                raise RuntimeError(f"Arch-specific file is empty after copy: {dst_file}")
+                raise RuntimeError(
+                    f"Arch-specific file is empty after copy: {dst_file}"
+                )
             if dst_file.stat().st_size != src_file.stat().st_size:
                 raise RuntimeError(
                     f"Arch-specific file size mismatch after copy: "
@@ -343,7 +348,7 @@ class ArtifactCombiner:
         prefixes: list[str],
         architectures: list[str],
         component_name: str,
-        output_dir: Path
+        output_dir: Path,
     ) -> None:
         """
         Create .kpm manifests for arch-specific artifact.
@@ -370,7 +375,9 @@ class ArtifactCombiner:
 
             if not kpack_files:
                 if self.verbose:
-                    print(f"        No .kpack files in prefix {prefix}, skipping manifest")
+                    print(
+                        f"        No .kpack files in prefix {prefix}, skipping manifest"
+                    )
                 continue
 
             # Build manifest entries from kpack files
@@ -383,14 +390,18 @@ class ArtifactCombiner:
                 name_parts = kpack_file.stem.rsplit("_", 1)
                 if len(name_parts) != 2:
                     if self.verbose:
-                        print(f"        Skipping kpack file with unexpected name: {kpack_file.name}")
+                        print(
+                            f"        Skipping kpack file with unexpected name: {kpack_file.name}"
+                        )
                     continue
 
                 arch = name_parts[1]
 
                 if arch not in architectures:
                     if self.verbose:
-                        print(f"        Skipping kpack for architecture {arch} (not in group)")
+                        print(
+                            f"        Skipping kpack for architecture {arch} (not in group)"
+                        )
                     continue
 
                 # Get file size
@@ -405,7 +416,7 @@ class ArtifactCombiner:
                     architecture=arch,
                     filename=kpack_file.name,
                     size=size,
-                    kernel_count=kernel_count
+                    kernel_count=kernel_count,
                 )
 
             if not kpack_entries:
@@ -418,7 +429,7 @@ class ArtifactCombiner:
                 format_version=1,
                 component_name=component_name,
                 prefix=prefix,
-                kpack_files=kpack_entries
+                kpack_files=kpack_entries,
             )
 
             # Write manifest
@@ -426,4 +437,6 @@ class ArtifactCombiner:
             manifest.to_file(manifest_path)
 
             if self.verbose:
-                print(f"        Created manifest with {len(kpack_entries)} architectures: {prefix}/.kpack/{component_name}.kpm")
+                print(
+                    f"        Created manifest with {len(kpack_entries)} architectures: {prefix}/.kpack/{component_name}.kpm"
+                )

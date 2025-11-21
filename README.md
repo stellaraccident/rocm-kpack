@@ -12,7 +12,7 @@ Current ROCm libraries handle device code distribution in two primary ways:
 
 1. **Fat binaries**: Embed hsaco files for all GPU architectures directly into shared objects, executables, and libraries. This results in bloated binaries containing code for architectures that may never be used.
 
-2. **Ad-hoc database directories**: Some libraries manage exploded directories of kernels and metadata in custom formats. These are difficult to package cleanly and lack standardization.
+1. **Ad-hoc database directories**: Some libraries manage exploded directories of kernels and metadata in custom formats. These are difficult to package cleanly and lack standardization.
 
 Neither approach provides a clean mechanism for distributing device code separately from host code, making it challenging to optimize download sizes and installation footprints for specific GPU architectures.
 
@@ -32,6 +32,7 @@ The project consists of three core components:
 ### 1. Python Tooling
 
 Tools for transforming ROCm install trees:
+
 - Extract device code (hsaco files) from binaries and database directories
 - Organize device code by GPU architecture (gfx target)
 - Generate kpack archives for packaging and distribution
@@ -40,6 +41,7 @@ Tools for transforming ROCm install trees:
 ### 2. C++ Runtime Library
 
 Runtime library for querying and loading device code:
+
 - Query kpack archives for supported hsaco files and metadata
 - Integrate with ROCm runtime for device code discovery
 - Provide host-side APIs for kernel library database management
@@ -48,6 +50,7 @@ Runtime library for querying and loading device code:
 ### 3. Comprehensive Testing
 
 Validation suite covering:
+
 - Python tooling correctness (extraction, bundling, unbundling)
 - C++ library API and functionality
 - Integration testing with real ROCm assets
@@ -69,6 +72,7 @@ Validation suite covering:
 ## Project Status
 
 This is an active development project. The initial implementation focuses on:
+
 - Python binutils for working with hsaco files
 - Bulk unbundling tools for extracting device code
 - Test infrastructure and asset management

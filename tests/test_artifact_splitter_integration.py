@@ -28,7 +28,13 @@ class TestArtifactSplitterIntegration:
     @pytest.fixture
     def create_test_artifact(self, tmp_path):
         """Create a test artifact directory structure."""
-        def _create(prefixes, files_per_prefix=5, include_fat_binaries=False, include_db_files=False):
+
+        def _create(
+            prefixes,
+            files_per_prefix=5,
+            include_fat_binaries=False,
+            include_db_files=False,
+        ):
             artifact_dir = tmp_path / "test_artifact"
             artifact_dir.mkdir()
 
@@ -61,8 +67,12 @@ class TestArtifactSplitterIntegration:
                     db_dir.mkdir(parents=True, exist_ok=True)
 
                     # Create mock rocBLAS database files
-                    (db_dir / "TensileLibrary_gfx1100.dat").write_text("Mock tensor data")
-                    (db_dir / "TensileLibrary_gfx1100.co").write_text("Mock code object")
+                    (db_dir / "TensileLibrary_gfx1100.dat").write_text(
+                        "Mock tensor data"
+                    )
+                    (db_dir / "TensileLibrary_gfx1100.co").write_text(
+                        "Mock code object"
+                    )
                     (db_dir / "kernels.db").write_text("Mock kernel database")
 
             return artifact_dir
@@ -73,8 +83,7 @@ class TestArtifactSplitterIntegration:
         """Test splitting a simple artifact without fat binaries or databases."""
         # Create test artifact with plain text files (not ELF)
         input_dir = create_test_artifact(
-            prefixes=["math-libs/BLAS/rocBLAS/stage"],
-            files_per_prefix=3
+            prefixes=["math-libs/BLAS/rocBLAS/stage"], files_per_prefix=3
         )
 
         output_dir = tmp_path / "output"
@@ -84,7 +93,7 @@ class TestArtifactSplitterIntegration:
             artifact_prefix="test_lib",
             toolchain=toolchain,
             database_handlers=[],
-            verbose=True
+            verbose=True,
         )
 
         # Run the split - text files won't be detected as fat binaries
@@ -124,7 +133,9 @@ class TestArtifactSplitterIntegration:
         lib_dir.mkdir(parents=True)
 
         # Copy real fat binary from test assets
-        fat_binary_src = test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
+        fat_binary_src = (
+            test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
+        )
         fat_binary_dest = lib_dir / "libtest.so"
         shutil.copy2(fat_binary_src, fat_binary_dest)
 
@@ -140,7 +151,7 @@ class TestArtifactSplitterIntegration:
             artifact_prefix="test_lib",
             toolchain=toolchain,
             database_handlers=[],
-            verbose=True
+            verbose=True,
         )
 
         # Run the full split operation
@@ -159,25 +170,31 @@ class TestArtifactSplitterIntegration:
         # Should have created architecture-specific artifacts
         # The test binary has gfx1100 and gfx1101 kernels
         arch_artifacts = list(output_dir.glob("test_lib_gfx*"))
-        assert len(arch_artifacts) >= 1, "Should have created at least one architecture-specific artifact"
+        assert (
+            len(arch_artifacts) >= 1
+        ), "Should have created at least one architecture-specific artifact"
 
         # Check that kpack files were created
         for arch_artifact in arch_artifacts:
             kpack_files = list(arch_artifact.glob("kpack/stage/.kpack/*.kpack"))
-            assert len(kpack_files) == 1, f"Should have one kpack file in {arch_artifact}"
+            assert (
+                len(kpack_files) == 1
+            ), f"Should have one kpack file in {arch_artifact}"
 
         # Check the manifest was created in generic artifact
         manifest_file = generic_dir / prefix / ".kpack" / "test_lib.kpm"
         assert manifest_file.exists(), "Manifest file should exist in generic artifact"
 
         # Verify manifest content
-        with open(manifest_file, 'rb') as f:
+        with open(manifest_file, "rb") as f:
             manifest_data = msgpack.unpack(f)
 
         assert manifest_data["format_version"] == 1
         assert manifest_data["component_name"] == "test_lib"
         assert manifest_data["prefix"] == prefix
-        assert len(manifest_data["kpack_files"]) >= 1, "Should have at least one architecture in manifest"
+        assert (
+            len(manifest_data["kpack_files"]) >= 1
+        ), "Should have at least one architecture in manifest"
 
         # Check each architecture entry has required fields
         for arch, info in manifest_data["kpack_files"].items():
@@ -190,20 +207,24 @@ class TestArtifactSplitterIntegration:
         # Verify device code was stripped from fat binary in generic artifact
         original_size = fat_binary_src.stat().st_size
         stripped_size = (generic_lib_dir / "libtest.so").stat().st_size
-        assert stripped_size < original_size, "Stripped binary should be smaller than original"
+        assert (
+            stripped_size < original_size
+        ), "Stripped binary should be smaller than original"
 
         # Run the artifact verifier to check all invariants
         verifier = ArtifactVerifier(output_dir, toolchain, verbose=False)
         all_checks_passed = verifier.run_all_checks()
         assert all_checks_passed, "Artifact verification should pass all checks"
 
-    def test_artifact_with_database_files(self, create_test_artifact, toolchain, tmp_path):
+    def test_artifact_with_database_files(
+        self, create_test_artifact, toolchain, tmp_path
+    ):
         """Test splitting artifact with kernel database files."""
         # Create test artifact with database files
         input_dir = create_test_artifact(
             prefixes=["math-libs/BLAS/rocBLAS/stage"],
             files_per_prefix=2,
-            include_db_files=True
+            include_db_files=True,
         )
 
         output_dir = tmp_path / "output"
@@ -214,7 +235,7 @@ class TestArtifactSplitterIntegration:
             artifact_prefix="rocblas_lib",
             toolchain=toolchain,
             database_handlers=[rocblas_handler],
-            verbose=True
+            verbose=True,
         )
 
         # Run the split - text files won't be detected as fat binaries
@@ -234,7 +255,9 @@ class TestArtifactSplitterIntegration:
         assert (db_path / "TensileLibrary_gfx1100.co").exists()
 
         # Verify database files are NOT in generic artifact
-        generic_db_path = generic_dir / "math-libs/BLAS/rocBLAS/stage/lib/rocblas/library"
+        generic_db_path = (
+            generic_dir / "math-libs/BLAS/rocBLAS/stage/lib/rocblas/library"
+        )
         if generic_db_path.exists():
             # Directory might exist but should be empty or not have database files
             assert not (generic_db_path / "TensileLibrary_gfx1100.dat").exists()
@@ -246,13 +269,10 @@ class TestArtifactSplitterIntegration:
         prefixes = [
             "math-libs/BLAS/rocBLAS/stage",
             "math-libs/BLAS/hipBLASLt/stage",
-            "kpack/stage"
+            "kpack/stage",
         ]
 
-        input_dir = create_test_artifact(
-            prefixes=prefixes,
-            files_per_prefix=2
-        )
+        input_dir = create_test_artifact(prefixes=prefixes, files_per_prefix=2)
 
         output_dir = tmp_path / "output"
 
@@ -261,7 +281,7 @@ class TestArtifactSplitterIntegration:
             artifact_prefix="multi_lib",
             toolchain=toolchain,
             database_handlers=[],
-            verbose=True
+            verbose=True,
         )
 
         # Run the split - text files won't be detected as fat binaries
@@ -285,7 +305,9 @@ class TestArtifactSplitterIntegration:
         lib_dir.mkdir()
 
         # Copy real binaries from test assets
-        fat_binary_src = test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
+        fat_binary_src = (
+            test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
+        )
         fat_binary = lib_dir / "fat.so"
         shutil.copy2(fat_binary_src, fat_binary)
 
@@ -300,9 +322,7 @@ class TestArtifactSplitterIntegration:
 
         # Create visitor with handlers
         visitor = FileClassificationVisitor(
-            toolchain=toolchain,
-            database_handlers=[RocBLASHandler()],
-            verbose=True
+            toolchain=toolchain, database_handlers=[RocBLASHandler()], verbose=True
         )
 
         # Visit files - now using real ELF analysis
@@ -326,7 +346,7 @@ class TestArtifactSplitterIntegration:
             kernel_data=b"kernel binary data",
             source_binary_relpath="lib/libtest.so",
             source_prefix="math-libs/BLAS/rocBLAS/stage",
-            architecture="gfx906"
+            architecture="gfx906",
         )
 
         assert kernel.target_name == "hipv4-amdgcn-amd-amdhsa--gfx906"
@@ -341,7 +361,7 @@ class TestArtifactSplitterIntegration:
             artifact_prefix="test",
             toolchain=toolchain,
             database_handlers=[],
-            verbose=False
+            verbose=False,
         )
 
         non_existent = tmp_path / "non_existent"
@@ -362,7 +382,7 @@ class TestArtifactSplitterIntegration:
             artifact_prefix="test",
             toolchain=toolchain,
             database_handlers=[],
-            verbose=False
+            verbose=False,
         )
 
         with pytest.raises(FileNotFoundError, match="artifact_manifest.txt not found"):
@@ -427,7 +447,9 @@ class TestArtifactSplitterIntegration:
         support_artifacts = list(output_dir.glob("support_dev_*"))
         assert len(support_artifacts) == 0, "support_dev_generic should be skipped"
 
-    def test_batch_split_with_database_handlers(self, create_test_artifact, toolchain, tmp_path):
+    def test_batch_split_with_database_handlers(
+        self, create_test_artifact, toolchain, tmp_path
+    ):
         """Test batch mode with database handlers."""
         # Create parent directory with BLAS artifacts
         parent_dir = tmp_path / "shard"
@@ -466,6 +488,9 @@ class TestArtifactSplitterIntegration:
         assert (output_dir / "blas_lib_gfx1100").exists()
 
         # Verify database files were moved to arch-specific artifact
-        arch_db_path = output_dir / "blas_lib_gfx1100/math-libs/BLAS/rocBLAS/stage/lib/rocblas/library"
+        arch_db_path = (
+            output_dir
+            / "blas_lib_gfx1100/math-libs/BLAS/rocBLAS/stage/lib/rocblas/library"
+        )
         assert (arch_db_path / "TensileLibrary_gfx1100.dat").exists()
         assert (arch_db_path / "TensileLibrary_gfx1100.co").exists()

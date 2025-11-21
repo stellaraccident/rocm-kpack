@@ -119,7 +119,9 @@ class BundleBuilder:
         if clang.exists():
             return clang
 
-        raise RuntimeError(f"Could not find clang++ in ROCm installation at {self.rocm_path}")
+        raise RuntimeError(
+            f"Could not find clang++ in ROCm installation at {self.rocm_path}"
+        )
 
     def _detect_code_object_version(self) -> str:
         """Detect code object version from compiler.
@@ -514,7 +516,9 @@ def main():
         description="Build test bundled binaries for rocm-kpack testing"
     )
     parser.add_argument(
-        "--rocm-path", type=Path, help="Path to ROCm installation (auto-detected if not specified)"
+        "--rocm-path",
+        type=Path,
+        help="Path to ROCm installation (auto-detected if not specified)",
     )
 
     args = parser.parse_args()

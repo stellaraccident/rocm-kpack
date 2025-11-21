@@ -4,8 +4,8 @@
 #ifndef ROCM_KPACK_H
 #define ROCM_KPACK_H
 
-#include "kpack_types.h"
 #include "kpack_export.h"
+#include "kpack_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,11 +62,8 @@ KPACK_API void kpack_close(kpack_archive_t archive);
 //   KPACK_SUCCESS on success
 //   KPACK_ERROR_INVALID_ARGUMENT if any pointer is NULL
 //   KPACK_ERROR_OUT_OF_MEMORY if allocation fails
-KPACK_API kpack_error_t kpack_get_architectures(
-    kpack_archive_t archive,
-    char*** arches,
-    size_t* count
-);
+KPACK_API kpack_error_t kpack_get_architectures(kpack_archive_t archive,
+                                                char*** arches, size_t* count);
 
 // Get list of binary names that have kernels in the archive
 //
@@ -82,11 +79,8 @@ KPACK_API kpack_error_t kpack_get_architectures(
 //   KPACK_SUCCESS on success
 //   KPACK_ERROR_INVALID_ARGUMENT if any pointer is NULL
 //   KPACK_ERROR_OUT_OF_MEMORY if allocation fails
-KPACK_API kpack_error_t kpack_get_binaries(
-    kpack_archive_t archive,
-    char*** binaries,
-    size_t* count
-);
+KPACK_API kpack_error_t kpack_get_binaries(kpack_archive_t archive,
+                                           char*** binaries, size_t* count);
 
 // Free string array returned by query functions
 //
@@ -117,13 +111,10 @@ KPACK_API void kpack_free_string_array(char** array, size_t count);
 //   KPACK_ERROR_KERNEL_NOT_FOUND if kernel doesn't exist
 //   KPACK_ERROR_DECOMPRESSION_FAILED if decompression fails
 //   KPACK_ERROR_OUT_OF_MEMORY if allocation fails
-KPACK_API kpack_error_t kpack_get_kernel(
-    kpack_archive_t archive,
-    const char* binary_name,
-    const char* arch,
-    void** kernel_data,
-    size_t* kernel_size
-);
+KPACK_API kpack_error_t kpack_get_kernel(kpack_archive_t archive,
+                                         const char* binary_name,
+                                         const char* arch, void** kernel_data,
+                                         size_t* kernel_size);
 
 // Free kernel data returned by kpack_get_kernel()
 //
@@ -136,4 +127,4 @@ KPACK_API void kpack_free_kernel(kpack_archive_t archive, void* kernel_data);
 }
 #endif
 
-#endif // ROCM_KPACK_H
+#endif  // ROCM_KPACK_H

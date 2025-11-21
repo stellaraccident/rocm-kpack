@@ -24,6 +24,7 @@ class KpackFileEntry:
 
 class FoundManifest(NamedTuple):
     """A manifest file found in an artifact."""
+
     path: Path
     manifest: "PackManifest"
 
@@ -59,7 +60,7 @@ class PackManifest:
             raise ValueError(f"Manifest file is empty: {manifest_path}")
 
         try:
-            with open(manifest_path, 'rb') as f:
+            with open(manifest_path, "rb") as f:
                 data = msgpack.unpack(f, raw=False)
         except msgpack.exceptions.UnpackException as e:
             raise ValueError(f"Invalid msgpack format in {manifest_path}: {e}") from e
@@ -90,20 +91,22 @@ class PackManifest:
             if "size" not in entry_data:
                 raise ValueError(f"Kpack entry for '{arch}' missing 'size' field")
             if "kernel_count" not in entry_data:
-                raise ValueError(f"Kpack entry for '{arch}' missing 'kernel_count' field")
+                raise ValueError(
+                    f"Kpack entry for '{arch}' missing 'kernel_count' field"
+                )
 
             kpack_entries[arch] = KpackFileEntry(
                 architecture=arch,
                 filename=entry_data["file"],
                 size=entry_data["size"],
-                kernel_count=entry_data["kernel_count"]
+                kernel_count=entry_data["kernel_count"],
             )
 
         return cls(
             format_version=data["format_version"],
             component_name=data["component_name"],
             prefix=data["prefix"],
-            kpack_files=kpack_entries
+            kpack_files=kpack_entries,
         )
 
     def to_file(self, manifest_path: Path) -> None:
@@ -119,19 +122,19 @@ class PackManifest:
             kpack_files_dict[arch] = {
                 "file": entry.filename,
                 "size": entry.size,
-                "kernel_count": entry.kernel_count
+                "kernel_count": entry.kernel_count,
             }
 
         data = {
             "format_version": self.format_version,
             "component_name": self.component_name,
             "prefix": self.prefix,
-            "kpack_files": kpack_files_dict
+            "kpack_files": kpack_files_dict,
         }
 
         # Write to file
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(manifest_path, 'wb') as f:
+        with open(manifest_path, "wb") as f:
             msgpack.pack(data, f)
 
         # Validate output
@@ -159,10 +162,7 @@ class ManifestMerger:
         self.verbose = verbose
 
     def merge_manifests(
-        self,
-        manifests: list[PackManifest],
-        component_name: str,
-        prefix: str
+        self, manifests: list[PackManifest], component_name: str, prefix: str
     ) -> PackManifest:
         """
         Merge multiple manifests into a single unified manifest.
@@ -182,7 +182,9 @@ class ManifestMerger:
             raise ValueError("Cannot merge empty list of manifests")
 
         if self.verbose:
-            print(f"  Merging {len(manifests)} manifests for component '{component_name}'")
+            print(
+                f"  Merging {len(manifests)} manifests for component '{component_name}'"
+            )
 
         # Validate all manifests have same component name
         for manifest in manifests:
@@ -221,20 +223,20 @@ class ManifestMerger:
                 merged_entries[arch] = entry
 
                 if self.verbose:
-                    print(f"    Added {arch}: {entry.filename} ({entry.kernel_count} kernels, {entry.size} bytes)")
+                    print(
+                        f"    Added {arch}: {entry.filename} ({entry.kernel_count} kernels, {entry.size} bytes)"
+                    )
 
         # Create merged manifest
         return PackManifest(
             format_version=1,
             component_name=component_name,
             prefix=prefix,
-            kpack_files=merged_entries
+            kpack_files=merged_entries,
         )
 
     def find_manifests_in_artifact(
-        self,
-        artifact_dir: Path,
-        prefix: str
+        self, artifact_dir: Path, prefix: str
     ) -> list[FoundManifest]:
         """
         Find all .kpm manifest files in an artifact for a specific prefix.
@@ -261,7 +263,9 @@ class ManifestMerger:
                 results.append(FoundManifest(path=manifest_path, manifest=manifest))
 
                 if self.verbose:
-                    print(f"  Found manifest: {manifest_path.relative_to(artifact_dir)}")
+                    print(
+                        f"  Found manifest: {manifest_path.relative_to(artifact_dir)}"
+                    )
             except ValueError as e:
                 raise RuntimeError(
                     f"Failed to parse manifest {manifest_path}: {e}\n"

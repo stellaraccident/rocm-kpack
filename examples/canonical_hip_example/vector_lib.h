@@ -13,4 +13,4 @@ int vector_add_and_sum(int n, float* result_sum);
 }
 #endif
 
-#endif // VECTOR_LIB_H
+#endif  // VECTOR_LIB_H

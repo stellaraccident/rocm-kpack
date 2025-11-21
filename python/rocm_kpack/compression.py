@@ -63,7 +63,9 @@ class Compressor(ABC):
         pass
 
     @abstractmethod
-    def finalize(self, inputs: list[tuple[str, CompressionInput]]) -> tuple[bytes, dict[str, object]]:
+    def finalize(
+        self, inputs: list[tuple[str, CompressionInput]]
+    ) -> tuple[bytes, dict[str, object]]:
         """Reduce phase: compress all kernels with cross-kernel optimization (exclusive).
 
         This method is called once with all prepared inputs. It performs
@@ -145,7 +147,9 @@ class NoOpCompressor(Compressor):
         """Store kernel data without compression."""
         return NoOpCompressionInput(data=kernel_data)
 
-    def finalize(self, inputs: list[tuple[str, CompressionInput]]) -> tuple[bytes, dict[str, object]]:
+    def finalize(
+        self, inputs: list[tuple[str, CompressionInput]]
+    ) -> tuple[bytes, dict[str, object]]:
         """Concatenate all kernel data and build blob metadata.
 
         Returns:
@@ -183,7 +187,9 @@ class NoOpCompressor(Compressor):
             raise RuntimeError("Compressor not initialized from TOC")
 
         if ordinal < 0 or ordinal >= len(self._blobs):
-            raise ValueError(f"Ordinal {ordinal} out of range (0..{len(self._blobs)-1})")
+            raise ValueError(
+                f"Ordinal {ordinal} out of range (0..{len(self._blobs)-1})"
+            )
 
         blob = self._blobs[ordinal]
         offset = blob["offset"]  # Absolute file offset (fixed up by PackArchive.write)
@@ -235,7 +241,9 @@ class ZstdCompressor(Compressor):
         self._file_path = None
         self._zstd_offset = None
         self._zstd_size = None
-        self._frame_index = None  # Built on first access: [(offset, size, original_size), ...]
+        self._frame_index = (
+            None  # Built on first access: [(offset, size, original_size), ...]
+        )
         self._decompressor = None  # Created lazily for reading
 
     def prepare_kernel(self, kernel_data: bytes, kernel_id: str) -> CompressionInput:
@@ -252,7 +260,9 @@ class ZstdCompressor(Compressor):
             original_size=len(kernel_data),
         )
 
-    def finalize(self, inputs: list[tuple[str, CompressionInput]]) -> tuple[bytes, dict[str, object]]:
+    def finalize(
+        self, inputs: list[tuple[str, CompressionInput]]
+    ) -> tuple[bytes, dict[str, object]]:
         """Concatenate pre-compressed frames sequentially.
 
         Format:
@@ -336,7 +346,9 @@ class ZstdCompressor(Compressor):
         self._build_frame_index()
 
         if ordinal < 0 or ordinal >= len(self._frame_index):
-            raise ValueError(f"Ordinal {ordinal} out of range (0..{len(self._frame_index)-1})")
+            raise ValueError(
+                f"Ordinal {ordinal} out of range (0..{len(self._frame_index)-1})"
+            )
 
         # Get frame from index
         frame_offset, frame_size = self._frame_index[ordinal]
@@ -355,7 +367,9 @@ COMPRESSION_SCHEMES = {
 }
 
 
-def create_compressor_from_toc(toc_data: dict[str, object], file_path: Path) -> Compressor:
+def create_compressor_from_toc(
+    toc_data: dict[str, object], file_path: Path
+) -> Compressor:
     """Factory function to create compressor from TOC metadata.
 
     Args:

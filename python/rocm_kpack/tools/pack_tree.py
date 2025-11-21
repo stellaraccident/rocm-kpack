@@ -108,7 +108,10 @@ Examples:
     # Parse gfx_arches
     gfx_arches = [arch.strip() for arch in args.gfx_arches.split(",")]
     if not gfx_arches:
-        print("Error: --gfx-arches must contain at least one architecture", file=sys.stderr)
+        print(
+            "Error: --gfx-arches must contain at least one architecture",
+            file=sys.stderr,
+        )
         return 1
 
     # Create output directory
@@ -177,6 +180,7 @@ Examples:
         except Exception as e:
             print(f"\nError during scanning: {e}", file=sys.stderr)
             import traceback
+
             traceback.print_exc()
             return 1
 
@@ -189,6 +193,7 @@ Examples:
         except Exception as e:
             print(f"\nError during finalization: {e}", file=sys.stderr)
             import traceback
+
             traceback.print_exc()
             return 1
 
@@ -237,7 +242,9 @@ Examples:
             print(f"Binaries in archive:")
             for binary_path in sorted(archive.toc.keys()):
                 arch_count = len(archive.toc[binary_path])
-                print(f"  {binary_path:<50} ({arch_count} arch{'s' if arch_count > 1 else ''})")
+                print(
+                    f"  {binary_path:<50} ({arch_count} arch{'s' if arch_count > 1 else ''})"
+                )
     except Exception as e:
         print(f"Warning: Could not read back kpack file: {e}", file=sys.stderr)
 

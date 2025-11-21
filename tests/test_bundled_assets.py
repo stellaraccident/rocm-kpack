@@ -59,7 +59,8 @@ def get_bundle_info(file_path: Path, toolchain: Toolchain) -> dict:
 
             # Look for gfx architecture identifiers
             import re
-            gfx_pattern = re.compile(r'gfx\d+')
+
+            gfx_pattern = re.compile(r"gfx\d+")
 
             for line in result.stdout.splitlines():
                 matches = gfx_pattern.findall(line)
@@ -94,14 +95,10 @@ def test_bundled_assets_exist(bundled_assets_dir: Path):
     ]
 
     for exe in expected_executables:
-        assert (
-            bundled_assets_dir / exe
-        ).exists(), f"Missing executable: {exe}"
+        assert (bundled_assets_dir / exe).exists(), f"Missing executable: {exe}"
 
     for lib in expected_libraries:
-        assert (
-            bundled_assets_dir / lib
-        ).exists(), f"Missing shared library: {lib}"
+        assert (bundled_assets_dir / lib).exists(), f"Missing shared library: {lib}"
 
 
 def test_single_arch_executable(bundled_assets_dir: Path, toolchain: Toolchain):
@@ -116,9 +113,7 @@ def test_single_arch_executable(bundled_assets_dir: Path, toolchain: Toolchain):
     assert len(gfx_targets) >= 1, "Should have at least one gfx target"
 
     # Verify gfx1100 is present
-    assert any(
-        "gfx1100" in t for t in info["targets"]
-    ), "Should contain gfx1100 target"
+    assert any("gfx1100" in t for t in info["targets"]), "Should contain gfx1100 target"
 
 
 def test_multi_arch_executable(bundled_assets_dir: Path, toolchain: Toolchain):
@@ -147,9 +142,7 @@ def test_compressed_executable(bundled_assets_dir: Path, toolchain: Toolchain):
     exe_path = bundled_assets_dir / "test_kernel_compressed.exe"
     info = get_bundle_info(exe_path, toolchain)
 
-    assert (
-        info["has_device_code"]
-    ), "Compressed executable should have device code"
+    assert info["has_device_code"], "Compressed executable should have device code"
 
     # Should have gfx1100 and gfx1101
     targets_str = " ".join(info["targets"])
@@ -187,9 +180,7 @@ def test_single_arch_library(bundled_assets_dir: Path, toolchain: Toolchain):
     assert info["has_device_code"], "Single arch library should have device code"
 
     # Verify gfx1100 is present
-    assert any(
-        "gfx1100" in t for t in info["targets"]
-    ), "Should contain gfx1100 target"
+    assert any("gfx1100" in t for t in info["targets"]), "Should contain gfx1100 target"
 
 
 def test_multi_arch_library(bundled_assets_dir: Path, toolchain: Toolchain):
@@ -243,9 +234,9 @@ def test_libraries_are_shared_objects(bundled_assets_dir: Path):
             ["file", str(lib_path)], capture_output=True, text=True, check=True
         )
 
-        assert "shared object" in result.stdout.lower(), (
-            f"{lib_name} should be a shared object, got: {result.stdout}"
-        )
+        assert (
+            "shared object" in result.stdout.lower()
+        ), f"{lib_name} should be a shared object, got: {result.stdout}"
 
 
 def test_hip_fatbin_sections_present(bundled_assets_dir: Path):
@@ -270,6 +261,6 @@ def test_hip_fatbin_sections_present(bundled_assets_dir: Path):
             check=True,
         )
 
-        assert ".hip_fatbin" in result.stdout, (
-            f"{binary_name} should have .hip_fatbin section"
-        )
+        assert (
+            ".hip_fatbin" in result.stdout
+        ), f"{binary_name} should have .hip_fatbin section"

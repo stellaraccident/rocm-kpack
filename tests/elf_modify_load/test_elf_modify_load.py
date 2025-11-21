@@ -53,7 +53,7 @@ def is_section_in_pt_load(binary_path: Path, section_name: str) -> bool:
     # Section headers span two lines:
     # Line 1: [Nr] Name Type Address Offset
     # Line 2:      Size EntSize Flags Link Info Align
-    lines = result.stdout.split('\n')
+    lines = result.stdout.split("\n")
     for i, line in enumerate(lines):
         if section_name in line:
             parts = line.split()
@@ -74,7 +74,7 @@ def is_section_in_pt_load(binary_path: Path, section_name: str) -> bool:
         return False  # Section doesn't exist
 
     # Non-ALLOC sections are never in PT_LOAD, even if vaddr overlaps
-    if section_flags and 'A' not in section_flags:
+    if section_flags and "A" not in section_flags:
         return False
 
     # Get PT_LOAD segments
@@ -91,11 +91,11 @@ def is_section_in_pt_load(binary_path: Path, section_name: str) -> bool:
     # Note: readelf output spans multiple lines:
     #   LOAD           0xoffset 0xvaddr 0xpaddr
     #                  0xfilesz 0xmemsz flags align
-    lines = result.stdout.split('\n')
+    lines = result.stdout.split("\n")
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        if line.startswith('LOAD'):
+        if line.startswith("LOAD"):
             # First line has: LOAD offset vaddr paddr
             parts1 = line.split()
             if len(parts1) >= 3:
@@ -111,8 +111,10 @@ def is_section_in_pt_load(binary_path: Path, section_name: str) -> bool:
 
                             # Check if section is within this PT_LOAD
                             section_end = section_vaddr + section_size
-                            if (load_vaddr <= section_vaddr < load_end or
-                                load_vaddr < section_end <= load_end):
+                            if (
+                                load_vaddr <= section_vaddr < load_end
+                                or load_vaddr < section_end <= load_end
+                            ):
                                 return True
                 except (ValueError, IndexError):
                     pass
@@ -142,7 +144,8 @@ def build_test_binaries():
                 "gcc",
                 "-O0",
                 "-g",
-                "-o", str(output),
+                "-o",
+                str(output),
                 str(source),
                 "-Wl,--section-start=.testdata=0x10000",
             ],
@@ -185,12 +188,9 @@ def apply_zero_page(input_path: Path, output_path: Path) -> tuple[int, str]:
     sys.stdout = output_buffer = io.StringIO()
 
     try:
-        exit_code = main([
-            'zero-page',
-            str(input_path),
-            str(output_path),
-            '--section=.testdata'
-        ])
+        exit_code = main(
+            ["zero-page", str(input_path), str(output_path), "--section=.testdata"]
+        )
         output = output_buffer.getvalue()
     finally:
         sys.stdout = old_stdout
@@ -315,6 +315,7 @@ def test_tool_reports_savings(build_test_binaries):
 
     # Parse the saved bytes
     import re
+
     match = re.search(r"Saved: ([\d,]+) bytes", output)
     assert match, "Should report saved bytes"
     saved_bytes = int(match.group(1).replace(",", ""))
@@ -332,13 +333,15 @@ def test_nonexistent_section(build_test_binaries):
     output_bin.unlink(missing_ok=True)
 
     # Call tool with a section that doesn't exist
-    exit_code = main([
-        'zero-page',
-        str(input_bin),
-        str(output_bin),
-        '--section=.nonexistent_section',
-        '--quiet'
-    ])
+    exit_code = main(
+        [
+            "zero-page",
+            str(input_bin),
+            str(output_bin),
+            "--section=.nonexistent_section",
+            "--quiet",
+        ]
+    )
 
     # Should fail gracefully
     assert exit_code != 0, "Should fail when section doesn't exist"
@@ -370,13 +373,15 @@ def test_all_cases_pass(build_test_binaries):
         assert output_bin.exists(), f"Output not created for {test_name}"
 
         # Binary should be smaller
-        assert (output_bin.stat().st_size < input_bin.stat().st_size), \
-            f"No size reduction for {test_name}"
+        assert (
+            output_bin.stat().st_size < input_bin.stat().st_size
+        ), f"No size reduction for {test_name}"
 
 
 # ============================================================================
 # New tests for map-section and update-relocation functionality
 # ============================================================================
+
 
 @pytest.fixture(scope="module")
 def build_mapped_section_test():
@@ -397,7 +402,8 @@ def build_mapped_section_test():
             "gcc",
             "-O0",
             "-g",
-            "-o", str(output),
+            "-o",
+            str(output),
             str(source),
         ],
         capture_output=True,
@@ -412,8 +418,10 @@ def build_mapped_section_test():
     result = subprocess.run(
         [
             "objcopy",
-            "--add-section", f".custom_data={str(custom_data_file)}",
-            "--set-section-flags", ".custom_data=contents,readonly",
+            "--add-section",
+            f".custom_data={str(custom_data_file)}",
+            "--set-section-flags",
+            ".custom_data=contents,readonly",
             str(output),
         ],
         capture_output=True,
@@ -445,8 +453,9 @@ def test_map_section_basic(build_mapped_section_test, toolchain):
     output_bin = TEST_DIR / "test_mapped_section.step1"
 
     # PRE-CONDITION: Verify .custom_data is NOT in a PT_LOAD before mapping
-    assert not is_section_in_pt_load(input_bin, ".custom_data"), \
-        ".custom_data should NOT be in PT_LOAD before mapping (section should not have ALLOC flag)"
+    assert not is_section_in_pt_load(
+        input_bin, ".custom_data"
+    ), ".custom_data should NOT be in PT_LOAD before mapping (section should not have ALLOC flag)"
 
     # Capture stdout
     old_stdout = sys.stdout
@@ -454,12 +463,14 @@ def test_map_section_basic(build_mapped_section_test, toolchain):
 
     try:
         # Map section with auto-allocated address (no --vaddr specified)
-        exit_code = main([
-            'map-section',
-            str(input_bin),
-            str(output_bin),
-            '--section=.custom_data',
-        ])
+        exit_code = main(
+            [
+                "map-section",
+                str(input_bin),
+                str(output_bin),
+                "--section=.custom_data",
+            ]
+        )
         output = output_buffer.getvalue()
     finally:
         sys.stdout = old_stdout
@@ -471,12 +482,15 @@ def test_map_section_basic(build_mapped_section_test, toolchain):
     assert "Successfully mapped" in output
 
     # POST-CONDITION: Verify .custom_data IS now in a PT_LOAD
-    assert is_section_in_pt_load(output_bin, ".custom_data"), \
-        ".custom_data should be in PT_LOAD after mapping"
+    assert is_section_in_pt_load(
+        output_bin, ".custom_data"
+    ), ".custom_data should be in PT_LOAD after mapping"
 
     # Use get_section_vaddr to retrieve the auto-allocated address
     mapped_vaddr = get_section_vaddr(toolchain, output_bin, ".custom_data")
-    assert mapped_vaddr is not None, ".custom_data should have a virtual address after mapping"
+    assert (
+        mapped_vaddr is not None
+    ), ".custom_data should have a virtual address after mapping"
 
     # Verify with readelf that new PT_LOAD exists at the mapped address
     result = subprocess.run(
@@ -509,13 +523,15 @@ def test_set_pointer_basic(build_mapped_section_test, toolchain):
     output_bin = TEST_DIR / "test_mapped_section.set_pointer"
 
     # Step 1: Map .custom_data section (auto-allocate address)
-    exit_code = main([
-        'map-section',
-        str(input_bin),
-        str(mapped_bin),
-        '--section=.custom_data',
-        '--quiet',
-    ])
+    exit_code = main(
+        [
+            "map-section",
+            str(input_bin),
+            str(mapped_bin),
+            "--section=.custom_data",
+            "--quiet",
+        ]
+    )
     assert exit_code == 0, "map-section failed"
 
     # Get the auto-allocated address
@@ -531,9 +547,9 @@ def test_set_pointer_basic(build_mapped_section_test, toolchain):
 
     wrapper_vaddr = None
     wrapper_offset = None
-    lines = result.stdout.split('\n')
+    lines = result.stdout.split("\n")
     for i, line in enumerate(lines):
-        if '.test_wrapper' in line:
+        if ".test_wrapper" in line:
             parts = line.split()
             if len(parts) >= 5:
                 wrapper_vaddr = int(parts[3], 16)  # Address column
@@ -549,7 +565,7 @@ def test_set_pointer_basic(build_mapped_section_test, toolchain):
 
     # Read original pointer value
     mapped_data = mapped_bin.read_bytes()
-    original_ptr = struct.unpack_from('<Q', mapped_data, pointer_offset)[0]
+    original_ptr = struct.unpack_from("<Q", mapped_data, pointer_offset)[0]
 
     # Step 2: Set pointer to the mapped section
     # Capture stdout
@@ -557,13 +573,15 @@ def test_set_pointer_basic(build_mapped_section_test, toolchain):
     sys.stdout = output_buffer = io.StringIO()
 
     try:
-        exit_code = main([
-            'set-pointer',
-            str(mapped_bin),
-            str(output_bin),
-            f'--at=0x{pointer_vaddr:x}',
-            f'--target=0x{target_vaddr:x}',
-        ])
+        exit_code = main(
+            [
+                "set-pointer",
+                str(mapped_bin),
+                str(output_bin),
+                f"--at=0x{pointer_vaddr:x}",
+                f"--target=0x{target_vaddr:x}",
+            ]
+        )
         output = output_buffer.getvalue()
     finally:
         sys.stdout = old_stdout
@@ -577,14 +595,14 @@ def test_set_pointer_basic(build_mapped_section_test, toolchain):
 
     # Step 3: Verify the pointer value was actually written to the file
     output_data = output_bin.read_bytes()
-    written_ptr = struct.unpack_from('<Q', output_data, pointer_offset)[0]
+    written_ptr = struct.unpack_from("<Q", output_data, pointer_offset)[0]
 
-    assert written_ptr == target_vaddr, \
-        f"Pointer not written correctly: expected 0x{target_vaddr:x}, got 0x{written_ptr:x}"
+    assert (
+        written_ptr == target_vaddr
+    ), f"Pointer not written correctly: expected 0x{target_vaddr:x}, got 0x{written_ptr:x}"
 
     # Verify the pointer value changed from original
-    assert written_ptr != original_ptr, \
-        f"Pointer value unchanged: {original_ptr:x}"
+    assert written_ptr != original_ptr, f"Pointer value unchanged: {original_ptr:x}"
 
     # Check if relocation was mentioned in output (indicates PIE binary with relocations)
     if "Updated relocation" in output:
@@ -596,8 +614,9 @@ def test_set_pointer_basic(build_mapped_section_test, toolchain):
         )
         # Look for relocation at our pointer address
         hex_addr = f"{pointer_vaddr:x}"
-        assert hex_addr in result.stdout.lower(), \
-            "Relocation should exist at pointer address"
+        assert (
+            hex_addr in result.stdout.lower()
+        ), "Relocation should exist at pointer address"
     elif "No relocation found" in output:
         # This is OK for non-PIE binaries
         pass
@@ -620,17 +639,21 @@ def test_set_pointer_requires_relocation_for_pie(build_mapped_section_test):
     # Try to set pointer at a location that has no relocation
     # Use an address in .rodata or another section without relocations
     # For this test, we'll use an arbitrary address that's valid but has no relocation
-    exit_code = main([
-        'set-pointer',
-        str(input_bin),
-        str(output_bin),
-        '--at=0x2100',  # Address in .rodata (read-only data, no relocations)
-        '--target=0x5000',
-        '--quiet',
-    ])
+    exit_code = main(
+        [
+            "set-pointer",
+            str(input_bin),
+            str(output_bin),
+            "--at=0x2100",  # Address in .rodata (read-only data, no relocations)
+            "--target=0x5000",
+            "--quiet",
+        ]
+    )
 
     # Should fail for PIE binary without relocation
-    assert exit_code != 0, "Should fail when setting pointer without relocation in PIE binary"
+    assert (
+        exit_code != 0
+    ), "Should fail when setting pointer without relocation in PIE binary"
     assert not output_bin.exists(), "Should not create output file on failure"
 
     # Cleanup (in case test failed and file was created)
@@ -651,23 +674,27 @@ def test_full_workflow_map_and_relocate(build_mapped_section_test, toolchain):
     final_bin = TEST_DIR / "test_mapped_section.mapped"
 
     # PRE-CONDITION: Verify .custom_data is NOT in a PT_LOAD before mapping
-    assert not is_section_in_pt_load(input_bin, ".custom_data"), \
-        ".custom_data should NOT be in PT_LOAD before mapping"
+    assert not is_section_in_pt_load(
+        input_bin, ".custom_data"
+    ), ".custom_data should NOT be in PT_LOAD before mapping"
 
     # Step 1: Map .custom_data to new PT_LOAD (auto-allocate address)
-    exit_code = main([
-        'map-section',
-        str(input_bin),
-        str(step1_bin),
-        '--section=.custom_data',
-        '--quiet',
-    ])
+    exit_code = main(
+        [
+            "map-section",
+            str(input_bin),
+            str(step1_bin),
+            "--section=.custom_data",
+            "--quiet",
+        ]
+    )
 
     assert exit_code == 0, "map-section failed"
 
     # POST-CONDITION: Verify .custom_data IS now in a PT_LOAD
-    assert is_section_in_pt_load(step1_bin, ".custom_data"), \
-        ".custom_data should be in PT_LOAD after mapping"
+    assert is_section_in_pt_load(
+        step1_bin, ".custom_data"
+    ), ".custom_data should be in PT_LOAD after mapping"
 
     # Get the auto-allocated address
     target_vaddr = get_section_vaddr(toolchain, step1_bin, ".custom_data")
@@ -682,8 +709,8 @@ def test_full_workflow_map_and_relocate(build_mapped_section_test, toolchain):
 
     # Parse to find .test_wrapper virtual address
     wrapper_vaddr = None
-    for line in result.stdout.split('\n'):
-        if '.test_wrapper' in line:
+    for line in result.stdout.split("\n"):
+        if ".test_wrapper" in line:
             parts = line.split()
             if len(parts) >= 4:
                 addr_str = parts[3]
@@ -695,14 +722,16 @@ def test_full_workflow_map_and_relocate(build_mapped_section_test, toolchain):
 
     pointer_vaddr = wrapper_vaddr + 8  # data_ptr field offset
 
-    exit_code = main([
-        'set-pointer',
-        str(step1_bin),
-        str(final_bin),
-        f'--at=0x{pointer_vaddr:x}',
-        f'--target=0x{target_vaddr:x}',
-        '--quiet',
-    ])
+    exit_code = main(
+        [
+            "set-pointer",
+            str(step1_bin),
+            str(final_bin),
+            f"--at=0x{pointer_vaddr:x}",
+            f"--target=0x{target_vaddr:x}",
+            "--quiet",
+        ]
+    )
 
     assert exit_code == 0, "set-pointer failed"
 
@@ -750,52 +779,51 @@ def test_preserves_pt_interp_when_expanding_phdr(build_mapped_section_test):
     if not input_bin.exists():
         pytest.skip("test_mapped_section binary not built")
 
-    exit_code = main([
-        'map-section',
-        str(input_bin),
-        str(output_bin),
-        '--section=.custom_data',  # This will trigger PHDR table expansion
-        '--quiet',
-    ])
+    exit_code = main(
+        [
+            "map-section",
+            str(input_bin),
+            str(output_bin),
+            "--section=.custom_data",  # This will trigger PHDR table expansion
+            "--quiet",
+        ]
+    )
 
     assert exit_code == 0, "map-section should succeed"
 
     # Verify PT_INTERP is intact using readelf
     result = subprocess.run(
-        ["readelf", "-l", str(output_bin)],
-        capture_output=True,
-        text=True
+        ["readelf", "-l", str(output_bin)], capture_output=True, text=True
     )
 
     assert result.returncode == 0, "readelf should succeed"
 
     # Check for correct interpreter path
-    assert "/lib64/ld-linux-x86-64.so.2" in result.stdout, \
-        "PT_INTERP should contain correct interpreter path"
+    assert (
+        "/lib64/ld-linux-x86-64.so.2" in result.stdout
+    ), "PT_INTERP should contain correct interpreter path"
 
     # Should NOT contain corrupted data like "P<E5>td"
-    assert "P�td" not in result.stdout, \
-        "PT_INTERP should not be corrupted"
-    assert "P<E5>td" not in result.stdout, \
-        "PT_INTERP should not be corrupted"
+    assert "P�td" not in result.stdout, "PT_INTERP should not be corrupted"
+    assert "P<E5>td" not in result.stdout, "PT_INTERP should not be corrupted"
 
     # Verify ldd can read the binary (comprehensive check)
     ldd_result = subprocess.run(
-        ["ldd", str(output_bin)],
-        capture_output=True,
-        text=True
+        ["ldd", str(output_bin)], capture_output=True, text=True
     )
 
     # ldd should succeed (exit code 0 or 1 is OK - 1 just means missing libs)
     assert ldd_result.returncode in [0, 1], "ldd should be able to parse binary"
 
     # Should show the correct interpreter
-    assert "/lib64/ld-linux-x86-64.so.2" in ldd_result.stdout, \
-        "ldd should show correct interpreter"
+    assert (
+        "/lib64/ld-linux-x86-64.so.2" in ldd_result.stdout
+    ), "ldd should show correct interpreter"
 
     # Should NOT show corrupted data
-    assert "�" not in ldd_result.stdout, \
-        "ldd output should not contain corrupted unicode"
+    assert (
+        "�" not in ldd_result.stdout
+    ), "ldd output should not contain corrupted unicode"
 
     # Cleanup
     output_bin.unlink(missing_ok=True)

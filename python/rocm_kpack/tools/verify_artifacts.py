@@ -25,6 +25,7 @@ from rocm_kpack.binutils import Toolchain, has_section, get_section_type
 @dataclass
 class VerificationResult:
     """Result of a single verification check."""
+
     check_name: str
     passed: bool
     message: str
@@ -34,7 +35,9 @@ class VerificationResult:
 class ArtifactVerifier:
     """Verifies split artifacts meet expected invariants."""
 
-    def __init__(self, artifacts_dir: Path, toolchain: Toolchain, verbose: bool = False):
+    def __init__(
+        self, artifacts_dir: Path, toolchain: Toolchain, verbose: bool = False
+    ):
         self.artifacts_dir = artifacts_dir
         self.toolchain = toolchain
         self.verbose = verbose
@@ -52,7 +55,10 @@ class ArtifactVerifier:
         # Discover artifacts
         artifacts = self._discover_artifacts()
         if not artifacts:
-            self._fail("No artifacts found", f"No artifact directories found in {self.artifacts_dir}")
+            self._fail(
+                "No artifacts found",
+                f"No artifact directories found in {self.artifacts_dir}",
+            )
             return False
 
         print(f"Found {len(artifacts)} artifacts:")
@@ -110,12 +116,16 @@ class ArtifactVerifier:
                 print(detail)
             print()
 
-        self.results.append(VerificationResult(
-            "Artifact Manifests",
-            all_passed,
-            "All manifests present and valid" if all_passed else "Some manifests missing or invalid",
-            details
-        ))
+        self.results.append(
+            VerificationResult(
+                "Artifact Manifests",
+                all_passed,
+                "All manifests present and valid"
+                if all_passed
+                else "Some manifests missing or invalid",
+                details,
+            )
+        )
 
     def _check_fat_binary_conversion(self, artifacts: list[Path]) -> None:
         """Verify fat binaries were converted to host-only (PROGBITS -> NOBITS)."""
@@ -129,12 +139,11 @@ class ArtifactVerifier:
         generic_artifacts = [a for a in artifacts if "generic" in a.name]
         if not generic_artifacts:
             print("⊘ No generic artifact found, skipping fat binary check\n")
-            self.results.append(VerificationResult(
-                "Fat Binary Conversion",
-                True,
-                "No generic artifact to check",
-                []
-            ))
+            self.results.append(
+                VerificationResult(
+                    "Fat Binary Conversion", True, "No generic artifact to check", []
+                )
+            )
             return
 
         for artifact in generic_artifacts:
@@ -161,7 +170,9 @@ class ArtifactVerifier:
                 section_type, section_size = section_info
 
                 if section_type == "PROGBITS":
-                    failed_binaries.append((rel_path, size_mb, "Still has PROGBITS .hip_fatbin"))
+                    failed_binaries.append(
+                        (rel_path, size_mb, "Still has PROGBITS .hip_fatbin")
+                    )
                     all_passed = False
                 elif section_type == "NOBITS":
                     # Check for .rocm_kpack_ref marker
@@ -169,11 +180,15 @@ class ArtifactVerifier:
                     if has_marker:
                         converted_binaries.append((rel_path, size_mb))
                     else:
-                        failed_binaries.append((rel_path, size_mb, "NOBITS but missing .rocm_kpack_ref"))
+                        failed_binaries.append(
+                            (rel_path, size_mb, "NOBITS but missing .rocm_kpack_ref")
+                        )
                         all_passed = False
 
             # Print summary
-            details.append(f"  Summary: {len(converted_binaries)} converted, {len(host_only_binaries)} host-only, {len(failed_binaries)} failed")
+            details.append(
+                f"  Summary: {len(converted_binaries)} converted, {len(host_only_binaries)} host-only, {len(failed_binaries)} failed"
+            )
             details.append("")
 
             # Print converted binaries
@@ -207,12 +222,16 @@ class ArtifactVerifier:
             print(detail)
         print()
 
-        self.results.append(VerificationResult(
-            "Fat Binary Conversion",
-            all_passed,
-            "All fat binaries converted" if all_passed else "Some binaries not converted",
-            details
-        ))
+        self.results.append(
+            VerificationResult(
+                "Fat Binary Conversion",
+                all_passed,
+                "All fat binaries converted"
+                if all_passed
+                else "Some binaries not converted",
+                details,
+            )
+        )
 
     def _check_architecture_separation(self, artifacts: list[Path]) -> None:
         """Verify architecture-specific artifacts only contain files for that architecture."""
@@ -232,12 +251,14 @@ class ArtifactVerifier:
 
         if not arch_artifacts:
             print("⊘ No architecture-specific artifacts found\n")
-            self.results.append(VerificationResult(
-                "Architecture Separation",
-                True,
-                "No arch-specific artifacts to check",
-                []
-            ))
+            self.results.append(
+                VerificationResult(
+                    "Architecture Separation",
+                    True,
+                    "No arch-specific artifacts to check",
+                    [],
+                )
+            )
             return
 
         for artifact, expected_arch in arch_artifacts:
@@ -254,14 +275,20 @@ class ArtifactVerifier:
                         contaminated.append((file, f"gfx{found_arch}"))
 
             if contaminated:
-                details.append(f"  ✗ {artifact.name}: {len(contaminated)} files from other architectures")
+                details.append(
+                    f"  ✗ {artifact.name}: {len(contaminated)} files from other architectures"
+                )
                 for file, wrong_arch in contaminated[:5]:  # Show first 5
-                    details.append(f"      - {file.relative_to(artifact)} contains {wrong_arch}")
+                    details.append(
+                        f"      - {file.relative_to(artifact)} contains {wrong_arch}"
+                    )
                 if len(contaminated) > 5:
                     details.append(f"      ... and {len(contaminated) - 5} more")
                 all_passed = False
             else:
-                details.append(f"  ✓ {artifact.name}: All files are {expected_arch} (checked {len(arch_files)} files)")
+                details.append(
+                    f"  ✓ {artifact.name}: All files are {expected_arch} (checked {len(arch_files)} files)"
+                )
 
         if all_passed:
             print("✓ All architectures correctly separated\n")
@@ -273,12 +300,16 @@ class ArtifactVerifier:
             print(detail)
         print()
 
-        self.results.append(VerificationResult(
-            "Architecture Separation",
-            all_passed,
-            "All archs separated" if all_passed else "Architecture cross-contamination detected",
-            details
-        ))
+        self.results.append(
+            VerificationResult(
+                "Architecture Separation",
+                all_passed,
+                "All archs separated"
+                if all_passed
+                else "Architecture cross-contamination detected",
+                details,
+            )
+        )
 
     def _check_kpack_archives(self, artifacts: list[Path]) -> None:
         """Verify kpack archives are present and valid."""
@@ -296,7 +327,9 @@ class ArtifactVerifier:
 
             kpack_files = list(kpack_dir.glob("*.kpack"))
             if not kpack_files:
-                details.append(f"  ✗ {artifact.name}: kpack directory exists but no .kpack files")
+                details.append(
+                    f"  ✗ {artifact.name}: kpack directory exists but no .kpack files"
+                )
                 all_passed = False
                 continue
 
@@ -313,7 +346,9 @@ class ArtifactVerifier:
                         # Read binary header
                         magic = f.read(4)
                         if magic != b"KPAK":
-                            details.append(f"  ✗ {artifact.name}: {kpack_file.name} has invalid magic: {magic}")
+                            details.append(
+                                f"  ✗ {artifact.name}: {kpack_file.name} has invalid magic: {magic}"
+                            )
                             all_passed = False
                             continue
 
@@ -326,7 +361,9 @@ class ArtifactVerifier:
                         toc = next(unpacker)
 
                     if not isinstance(toc, dict):
-                        details.append(f"  ✗ {artifact.name}: {kpack_file.name} has invalid TOC")
+                        details.append(
+                            f"  ✗ {artifact.name}: {kpack_file.name} has invalid TOC"
+                        )
                         all_passed = False
                         continue
 
@@ -338,20 +375,23 @@ class ArtifactVerifier:
                             kernel_count += 1
 
                     size_mb = kpack_file.stat().st_size / (1024 * 1024)
-                    details.append(f"  ✓ {artifact.name}: {kpack_file.name} ({size_mb:.1f}MB, {kernel_count} kernels)")
+                    details.append(
+                        f"  ✓ {artifact.name}: {kpack_file.name} ({size_mb:.1f}MB, {kernel_count} kernels)"
+                    )
 
                 except Exception as e:
-                    details.append(f"  ✗ {artifact.name}: {kpack_file.name} invalid: {e}")
+                    details.append(
+                        f"  ✗ {artifact.name}: {kpack_file.name} invalid: {e}"
+                    )
                     all_passed = False
 
         if not details:
             print("⊘ No kpack archives found\n")
-            self.results.append(VerificationResult(
-                "Kpack Archives",
-                True,
-                "No kpack archives to check",
-                []
-            ))
+            self.results.append(
+                VerificationResult(
+                    "Kpack Archives", True, "No kpack archives to check", []
+                )
+            )
             return
 
         if all_passed:
@@ -364,16 +404,22 @@ class ArtifactVerifier:
             print(detail)
         print()
 
-        self.results.append(VerificationResult(
-            "Kpack Archives",
-            all_passed,
-            "All kpack archives valid" if all_passed else "Some kpack archives invalid",
-            details
-        ))
+        self.results.append(
+            VerificationResult(
+                "Kpack Archives",
+                all_passed,
+                "All kpack archives valid"
+                if all_passed
+                else "Some kpack archives invalid",
+                details,
+            )
+        )
 
     def _get_hip_fatbin_section(self, binary_path: Path) -> Optional[tuple[str, int]]:
         """Get .hip_fatbin section type and size. Returns None if no section."""
-        section_type = get_section_type(binary_path, ".hip_fatbin", toolchain=self.toolchain)
+        section_type = get_section_type(
+            binary_path, ".hip_fatbin", toolchain=self.toolchain
+        )
         if section_type is None:
             return None
         # Size is not critical for verification, just need to know type
@@ -439,34 +485,33 @@ Examples:
 
   # Verbose mode
   %(prog)s --artifacts-dir /path/to/split/artifacts --verbose
-"""
+""",
     )
 
     parser.add_argument(
         "--artifacts-dir",
         type=Path,
         required=True,
-        help="Directory containing split artifacts to verify"
+        help="Directory containing split artifacts to verify",
     )
 
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose output"
-    )
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
 
     parser.add_argument(
         "--clang-offload-bundler",
         type=Path,
         default=None,
-        help="Path to clang-offload-bundler tool (optional, for toolchain initialization)"
+        help="Path to clang-offload-bundler tool (optional, for toolchain initialization)",
     )
 
     args = parser.parse_args()
 
     # Validate arguments
     if not args.artifacts_dir.exists():
-        print(f"Error: Artifacts directory does not exist: {args.artifacts_dir}", file=sys.stderr)
+        print(
+            f"Error: Artifacts directory does not exist: {args.artifacts_dir}",
+            file=sys.stderr,
+        )
         return 2
 
     if not args.artifacts_dir.is_dir():

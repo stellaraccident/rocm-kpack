@@ -15,10 +15,12 @@ from rocm_kpack.kpack import PackedKernelArchive
 
 
 # Fixtures for parameterized tests
-@pytest.fixture(params=[
-    pytest.param(NoOpCompressor(), id="noop"),
-    pytest.param(ZstdCompressor(compression_level=3), id="zstd"),
-])
+@pytest.fixture(
+    params=[
+        pytest.param(NoOpCompressor(), id="noop"),
+        pytest.param(ZstdCompressor(compression_level=3), id="zstd"),
+    ]
+)
 def compressor(request):
     """Parameterized fixture providing different compressor implementations."""
     return request.param
@@ -129,7 +131,9 @@ class TestZstdCompressor:
 
         # Level 1 (fast)
         archive1 = PackedKernelArchive(
-            group_name="test", gfx_arch_family="gfx1100", gfx_arches=["gfx1100"],
+            group_name="test",
+            gfx_arch_family="gfx1100",
+            gfx_arches=["gfx1100"],
             compressor=ZstdCompressor(compression_level=1),
         )
         archive1.add_kernel(archive1.prepare_kernel("bin/test", "gfx1100", data))
@@ -139,7 +143,9 @@ class TestZstdCompressor:
 
         # Level 19 (max compression)
         archive19 = PackedKernelArchive(
-            group_name="test", gfx_arch_family="gfx1100", gfx_arches=["gfx1100"],
+            group_name="test",
+            gfx_arch_family="gfx1100",
+            gfx_arches=["gfx1100"],
             compressor=ZstdCompressor(compression_level=19),
         )
         archive19.add_kernel(archive19.prepare_kernel("bin/test", "gfx1100", data))
@@ -250,10 +256,15 @@ class TestPackedKernelArchive:
         # Verify kernels
         assert loaded.get_kernel("bin/hipcc", "gfx1030") == b"kernel_data_gfx1030"
         assert loaded.get_kernel("bin/hipcc", "gfx1001") == b"kernel_data_gfx1001"
-        assert loaded.get_kernel("lib/libhipblas.so", "gfx1030") == b"hipblas_kernel_gfx1030"
+        assert (
+            loaded.get_kernel("lib/libhipblas.so", "gfx1030")
+            == b"hipblas_kernel_gfx1030"
+        )
 
         # Verify metadata preserved
-        assert loaded.toc["lib/libhipblas.so"]["gfx1030"]["metadata"] == {"version": "1.0"}
+        assert loaded.toc["lib/libhipblas.so"]["gfx1030"]["metadata"] == {
+            "version": "1.0"
+        }
 
         # Verify non-existent kernels
         assert loaded.get_kernel("nonexistent/binary", "gfx1030") is None
@@ -354,7 +365,9 @@ class TestPackedKernelArchive:
         # Add kernels for different architectures
         for arch in ["gfx1030", "gfx1031", "gfx1032"]:
             archive.add_kernel(
-                archive.prepare_kernel("bin/app", arch, f"kernel_for_{arch}_".encode() * 100)
+                archive.prepare_kernel(
+                    "bin/app", arch, f"kernel_for_{arch}_".encode() * 100
+                )
             )
 
         archive.finalize_archive()
@@ -374,7 +387,9 @@ class TestPackedKernelArchive:
         """Test that TOC contains compression_scheme field."""
         # Write archive
         archive = PackedKernelArchive(
-            group_name="test", gfx_arch_family="gfx1100", gfx_arches=["gfx1100"],
+            group_name="test",
+            gfx_arch_family="gfx1100",
+            gfx_arches=["gfx1100"],
             compressor=compressor,
         )
         archive.add_kernel(archive.prepare_kernel("bin/test", "gfx1100", b"data"))
@@ -399,7 +414,9 @@ class TestPackedKernelArchive:
     def test_ordinals_in_toc(self, compressor, tmp_path):
         """Test that per-kernel TOC entries use ordinals."""
         archive = PackedKernelArchive(
-            group_name="test", gfx_arch_family="gfx1100", gfx_arches=["gfx1100"],
+            group_name="test",
+            gfx_arch_family="gfx1100",
+            gfx_arches=["gfx1100"],
             compressor=compressor,
         )
         archive.add_kernel(archive.prepare_kernel("bin/app1", "gfx1100", b"data1"))
@@ -438,8 +455,14 @@ class TestPackedKernelArchive:
 
 def test_compute_pack_filename():
     """Test pack filename computation."""
-    assert PackedKernelArchive.compute_pack_filename("blas", "gfx1100") == "blas-gfx1100.kpack"
-    assert PackedKernelArchive.compute_pack_filename("torch", "gfx100X") == "torch-gfx100X.kpack"
+    assert (
+        PackedKernelArchive.compute_pack_filename("blas", "gfx1100")
+        == "blas-gfx1100.kpack"
+    )
+    assert (
+        PackedKernelArchive.compute_pack_filename("torch", "gfx100X")
+        == "torch-gfx100X.kpack"
+    )
 
 
 def test_pack_archive_repr():

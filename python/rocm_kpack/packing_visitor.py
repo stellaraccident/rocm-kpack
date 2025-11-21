@@ -186,12 +186,15 @@ class PackingVisitor(ArtifactVisitor):
             kpack_relative_path = f".kpack/{self.kpack_filename}"
         else:
             # Binary is in subdirectory - need to go up
-            kpack_relative_path = "/".join([".."] * binary_depth + [".kpack", self.kpack_filename])
+            kpack_relative_path = "/".join(
+                [".."] * binary_depth + [".kpack", self.kpack_filename]
+            )
 
         # Add kpack ref marker to original binary FIRST (before kpacking)
         # This creates a temporary binary with .rocm_kpack_ref section added
         import tempfile
-        with tempfile.NamedTemporaryFile(suffix='.with_marker', delete=False) as tmp:
+
+        with tempfile.NamedTemporaryFile(suffix=".with_marker", delete=False) as tmp:
             temp_with_marker = Path(tmp.name)
 
         try:
@@ -209,7 +212,10 @@ class PackingVisitor(ArtifactVisitor):
             host_only_dest.parent.mkdir(parents=True, exist_ok=True)
 
             from rocm_kpack.elf_offload_kpacker import kpack_offload_binary
-            kpack_offload_binary(temp_with_marker, host_only_dest, toolchain=self.toolchain)
+
+            kpack_offload_binary(
+                temp_with_marker, host_only_dest, toolchain=self.toolchain
+            )
 
         finally:
             # Clean up temp file
