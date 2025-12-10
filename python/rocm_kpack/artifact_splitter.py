@@ -167,8 +167,16 @@ class GenericCopyVisitor:
         # Create parent directories
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Copy the file
-        shutil.copy2(file_path, dest_path)
+        # Handle symlinks vs regular files
+        if file_path.is_symlink():
+            # Preserve symlink (don't follow)
+            link_target = os.readlink(file_path)
+            if dest_path.exists() or dest_path.is_symlink():
+                dest_path.unlink()
+            os.symlink(link_target, dest_path)
+        else:
+            # Copy regular file
+            shutil.copy2(file_path, dest_path)
         self.copied_count += 1
 
     def get_statistics(self) -> str:
@@ -277,7 +285,8 @@ class ArtifactSplitter:
 
         # Walk through all files and copy non-excluded ones using robust traversal
         for file_path, direntry in scan_directory(prefix_path):
-            if direntry.is_file(follow_symlinks=False):
+            # Handle both regular files and symlinks
+            if direntry.is_file(follow_symlinks=False) or direntry.is_symlink():
                 copy_visitor.visit_file(file_path)
 
         if self.verbose:
@@ -341,7 +350,11 @@ class ArtifactSplitter:
     ) -> Dict[str, KpackInfo]:
         """
         Create kpack files from all extracted kernels in architecture-specific artifacts.
-        Creates a single kpack file per architecture containing kernels from all prefixes.
+        Creates a single kpack file per architecture, placed in the first prefix's .kpack directory.
+
+        The kpack file is placed in the original prefix directory structure (not a synthetic
+        "kpack/stage" prefix) so that when generic and arch-specific artifacts are overlaid
+        during bootstrap, the .kpack directory merges correctly with the .kpm manifest.
 
         Args:
             all_kernels_by_arch: Dictionary mapping architecture to list of ALL ExtractedKernel objects from all prefixes
@@ -365,25 +378,28 @@ class ArtifactSplitter:
             if not kernel_list:
                 continue
 
-            # Count kernels by prefix for verbose output
-            kernels_by_prefix = defaultdict(int)
+            # Group kernels by prefix
+            kernels_by_prefix: Dict[str, List[ExtractedKernel]] = defaultdict(list)
             for kernel in kernel_list:
-                kernels_by_prefix[kernel.source_prefix] += 1
+                kernels_by_prefix[kernel.source_prefix].append(kernel)
 
             if self.verbose:
                 print(
                     f"  Creating kpack for {arch} with {len(kernel_list)} kernels total"
                 )
-                for prefix, count in kernels_by_prefix.items():
-                    print(f"    - {count} kernels from {prefix}")
+                for prefix, kernels in kernels_by_prefix.items():
+                    print(f"    - {len(kernels)} kernels from {prefix}")
 
             # Create architecture-specific artifact directory
             arch_artifact_name = f"{self.artifact_prefix}_{arch}"
             arch_artifact_dir = output_dir / arch_artifact_name
 
-            # Create the synthetic kpack prefix
-            kpack_prefix = "kpack/stage"
-            kpack_prefix_dir = arch_artifact_dir / kpack_prefix
+            # Use the first prefix as the location for the kpack file.
+            # This preserves the original directory structure so that when
+            # generic and arch-specific artifacts are overlaid, the .kpack/
+            # directory containing both .kpm (generic) and .kpack (arch) merge.
+            first_prefix = sorted(kernels_by_prefix.keys())[0]
+            kpack_prefix_dir = arch_artifact_dir / first_prefix
 
             # Create .kpack directory (hidden)
             kpack_dir = kpack_prefix_dir / ".kpack"
@@ -440,17 +456,19 @@ class ArtifactSplitter:
                 print(f"    Size: {kpack_size} bytes")
 
             # Update or create artifact manifest for this architecture artifact
-            # Need to include the kpack/stage prefix
+            # Include all prefixes that contributed kernels
             manifest_path = arch_artifact_dir / "artifact_manifest.txt"
             existing_prefixes = []
             if manifest_path.exists():
                 with open(manifest_path, "r") as f:
                     existing_prefixes = [line.strip() for line in f if line.strip()]
 
-            # Add kpack prefix if not already present
-            if kpack_prefix not in existing_prefixes:
-                existing_prefixes.append(kpack_prefix)
-                write_artifact_manifest(arch_artifact_dir, existing_prefixes)
+            # Add all prefixes that had kernels
+            for prefix in kernels_by_prefix.keys():
+                if prefix not in existing_prefixes:
+                    existing_prefixes.append(prefix)
+
+            write_artifact_manifest(arch_artifact_dir, sorted(existing_prefixes))
 
         return kpack_info_by_arch
 
@@ -659,6 +677,9 @@ class ArtifactSplitter:
         # Track fat binaries by prefix for later processing
         fat_binaries_by_prefix: Dict[str, List[Path]] = {}
 
+        # Track prefixes that were actually processed (for manifest)
+        processed_prefixes: List[str] = []
+
         # Process each prefix
         for prefix in prefixes:
             prefix_path = input_dir / prefix
@@ -697,10 +718,8 @@ class ArtifactSplitter:
                 prefix_path, generic_prefix_dir, classifier.exclude_from_generic
             )
 
-            # Write artifact manifest for generic artifact
-            if not generic_artifact_dir.exists():
-                generic_artifact_dir.mkdir(parents=True, exist_ok=True)
-            write_artifact_manifest(generic_artifact_dir, [prefix])
+            # Track this prefix for the manifest
+            processed_prefixes.append(prefix)
 
             # Phase 4: Process fat binaries and accumulate kernels
             if classifier.fat_binaries:
@@ -737,6 +756,13 @@ class ArtifactSplitter:
             self.inject_kpack_references(
                 fat_binaries_by_prefix, generic_artifact_dir, kpack_info_by_arch
             )
+
+        # Phase 7: Write artifact manifest for generic artifact with all prefixes
+        if processed_prefixes:
+            generic_artifact_dir = output_dir / f"{self.artifact_prefix}_generic"
+            if not generic_artifact_dir.exists():
+                generic_artifact_dir.mkdir(parents=True, exist_ok=True)
+            write_artifact_manifest(generic_artifact_dir, processed_prefixes)
 
         if self.verbose:
             print(f"\nSplitting complete. Output in: {output_dir}")

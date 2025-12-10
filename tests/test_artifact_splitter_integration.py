@@ -174,12 +174,12 @@ class TestArtifactSplitterIntegration:
             len(arch_artifacts) >= 1
         ), "Should have created at least one architecture-specific artifact"
 
-        # Check that kpack files were created
+        # Check that kpack files were created (using original prefix, not synthetic)
         for arch_artifact in arch_artifacts:
-            kpack_files = list(arch_artifact.glob("kpack/stage/.kpack/*.kpack"))
+            kpack_files = list(arch_artifact.glob(f"{prefix}/.kpack/*.kpack"))
             assert (
                 len(kpack_files) == 1
-            ), f"Should have one kpack file in {arch_artifact}"
+            ), f"Should have one kpack file in {arch_artifact}/{prefix}/.kpack/"
 
         # Check the manifest was created in generic artifact
         manifest_file = generic_dir / prefix / ".kpack" / "test_lib.kpm"
@@ -494,3 +494,253 @@ class TestArtifactSplitterIntegration:
         )
         assert (arch_db_path / "TensileLibrary_gfx1100.dat").exists()
         assert (arch_db_path / "TensileLibrary_gfx1100.co").exists()
+
+    def test_kpack_uses_original_prefix_not_synthetic(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """
+        Test that kpack files are placed in original prefix directory, not synthetic kpack/stage.
+
+        This is critical for bootstrap overlay: when generic and arch-specific artifacts
+        are extracted to the same location, the .kpack/ directory must merge correctly.
+
+        Before fix: rand_lib_gfx1201/kpack/stage/.kpack/rand_lib_gfx1201.kpack
+        After fix:  rand_lib_gfx1201/math-libs/rocRAND/stage/.kpack/rand_lib_gfx1201.kpack
+        """
+        # Create test artifact structure with fat binary
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        # Use a realistic prefix path
+        prefix = "math-libs/rocRAND/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        # Create prefix directory with fat binary
+        prefix_dir = input_dir / prefix
+        lib_dir = prefix_dir / "lib"
+        lib_dir.mkdir(parents=True)
+
+        # Copy real fat binary from test assets
+        fat_binary_src = (
+            test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
+        )
+        shutil.copy2(fat_binary_src, lib_dir / "librocrand.so")
+
+        output_dir = tmp_path / "output"
+
+        # Run split
+        splitter = ArtifactSplitter(
+            artifact_prefix="rand_lib",
+            toolchain=toolchain,
+            database_handlers=[],
+            verbose=True,
+        )
+        splitter.split(input_dir, output_dir)
+
+        # Find arch-specific artifacts
+        arch_artifacts = list(output_dir.glob("rand_lib_gfx*"))
+        assert (
+            len(arch_artifacts) >= 1
+        ), "Should have at least one arch-specific artifact"
+
+        for arch_artifact in arch_artifacts:
+            # CRITICAL: kpack should be in original prefix, NOT kpack/stage
+            wrong_path = arch_artifact / "kpack/stage/.kpack"
+            correct_path = arch_artifact / prefix / ".kpack"
+
+            assert (
+                not wrong_path.exists()
+            ), f"kpack file should NOT be in synthetic kpack/stage/ path: {wrong_path}"
+            assert (
+                correct_path.exists()
+            ), f"kpack file should be in original prefix path: {correct_path}"
+
+            # Verify kpack file exists in correct location
+            kpack_files = list(correct_path.glob("*.kpack"))
+            assert (
+                len(kpack_files) == 1
+            ), f"Should have exactly one kpack file in {correct_path}"
+
+    def test_generic_manifest_includes_all_prefixes(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """
+        Test that generic artifact manifest includes ALL prefixes, not just the last one.
+
+        Before fix: manifest only contained last processed prefix (overwrite bug)
+        After fix:  manifest contains all prefixes
+        """
+        # Create artifact with multiple prefixes
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefixes = [
+            "math-libs/rocRAND/stage",
+            "math-libs/hipRAND/stage",
+        ]
+        write_artifact_manifest(input_dir, prefixes)
+
+        # Create directories and files for each prefix
+        for prefix in prefixes:
+            prefix_dir = input_dir / prefix
+            lib_dir = prefix_dir / "lib"
+            lib_dir.mkdir(parents=True)
+            (lib_dir / "libtest.so").write_text("mock library")
+
+        output_dir = tmp_path / "output"
+
+        # Run split
+        splitter = ArtifactSplitter(
+            artifact_prefix="rand_lib",
+            toolchain=toolchain,
+            database_handlers=[],
+            verbose=True,
+        )
+        splitter.split(input_dir, output_dir)
+
+        # Check generic artifact manifest
+        generic_dir = output_dir / "rand_lib_generic"
+        generic_manifest = read_artifact_manifest(generic_dir)
+
+        # CRITICAL: All prefixes must be in the manifest
+        assert len(generic_manifest) == len(
+            prefixes
+        ), f"Generic manifest should have {len(prefixes)} prefixes, got {len(generic_manifest)}"
+        for prefix in prefixes:
+            assert (
+                prefix in generic_manifest
+            ), f"Prefix '{prefix}' missing from generic manifest: {generic_manifest}"
+
+    def test_symlinks_preserved_in_generic_artifact(self, toolchain, tmp_path):
+        """
+        Test that symlinks are preserved when copying to generic artifact.
+
+        Before fix: Only regular files were copied, symlinks were lost
+        After fix:  Symlinks are preserved with their original targets
+        """
+        # Create artifact with symlinks (simulating .so versioning)
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefix = "math-libs/rocRAND/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        # Create prefix directory with library and version symlinks
+        prefix_dir = input_dir / prefix
+        lib_dir = prefix_dir / "lib"
+        lib_dir.mkdir(parents=True)
+
+        # Create the actual library file
+        real_lib = lib_dir / "librocrand.so.1.1"
+        real_lib.write_text("mock library content")
+
+        # Create symlinks (typical Linux .so versioning)
+        import os
+
+        os.symlink("librocrand.so.1.1", lib_dir / "librocrand.so.1")
+        os.symlink("librocrand.so.1", lib_dir / "librocrand.so")
+
+        output_dir = tmp_path / "output"
+
+        # Run split
+        splitter = ArtifactSplitter(
+            artifact_prefix="rand_lib",
+            toolchain=toolchain,
+            database_handlers=[],
+            verbose=True,
+        )
+        splitter.split(input_dir, output_dir)
+
+        # Check generic artifact
+        generic_lib_dir = output_dir / "rand_lib_generic" / prefix / "lib"
+
+        # CRITICAL: Both symlinks and real file must exist
+        assert (
+            generic_lib_dir / "librocrand.so.1.1"
+        ).exists(), "Real library file missing"
+        assert (
+            generic_lib_dir / "librocrand.so.1"
+        ).is_symlink(), "Version symlink missing"
+        assert (
+            generic_lib_dir / "librocrand.so"
+        ).is_symlink(), "SONAME symlink missing"
+
+        # Verify symlink targets are correct
+        assert os.readlink(generic_lib_dir / "librocrand.so.1") == "librocrand.so.1.1"
+        assert os.readlink(generic_lib_dir / "librocrand.so") == "librocrand.so.1"
+
+        # Verify the symlink chain works (can resolve to real file)
+        assert (generic_lib_dir / "librocrand.so").resolve().name == "librocrand.so.1.1"
+
+    def test_overlay_produces_merged_kpack_directory(
+        self, test_assets_dir, toolchain, tmp_path
+    ):
+        """
+        Test that extracting generic + arch artifacts to same location merges correctly.
+
+        This simulates the bootstrap scenario where both artifacts are extracted
+        to reconstitute a complete stage/ directory.
+        """
+        # Create test artifact with fat binary
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+
+        prefix = "math-libs/rocRAND/stage"
+        write_artifact_manifest(input_dir, [prefix])
+
+        prefix_dir = input_dir / prefix
+        lib_dir = prefix_dir / "lib"
+        lib_dir.mkdir(parents=True)
+
+        # Copy real fat binary
+        fat_binary_src = (
+            test_assets_dir / "bundled_binaries/linux/cov5/libtest_kernel_multi.so"
+        )
+        shutil.copy2(fat_binary_src, lib_dir / "librocrand.so")
+
+        output_dir = tmp_path / "output"
+
+        # Run split
+        splitter = ArtifactSplitter(
+            artifact_prefix="rand_lib",
+            toolchain=toolchain,
+            database_handlers=[],
+            verbose=True,
+        )
+        splitter.split(input_dir, output_dir)
+
+        # Simulate bootstrap overlay
+        overlay_dir = tmp_path / "overlay"
+        overlay_dir.mkdir()
+
+        # Extract generic first
+        generic_dir = output_dir / "rand_lib_generic"
+        shutil.copytree(generic_dir, overlay_dir, dirs_exist_ok=True)
+
+        # Extract arch-specific on top (should merge .kpack directory)
+        arch_artifacts = list(output_dir.glob("rand_lib_gfx*"))
+        for arch_artifact in arch_artifacts:
+            shutil.copytree(arch_artifact, overlay_dir, dirs_exist_ok=True)
+
+        # Verify .kpack directory has both .kpm and .kpack files
+        kpack_dir = overlay_dir / prefix / ".kpack"
+        assert kpack_dir.exists(), ".kpack directory should exist after overlay"
+
+        kpm_files = list(kpack_dir.glob("*.kpm"))
+        kpack_files = list(kpack_dir.glob("*.kpack"))
+
+        assert (
+            len(kpm_files) == 1
+        ), f"Should have exactly one .kpm manifest file, got {kpm_files}"
+        assert (
+            len(kpack_files) >= 1
+        ), f"Should have at least one .kpack kernel file, got {kpack_files}"
+
+        # Verify the manifest references the kpack files
+        manifest_path = kpm_files[0]
+        with open(manifest_path, "rb") as f:
+            manifest_data = msgpack.unpack(f)
+
+        # Manifest should list the architectures
+        assert "kpack_files" in manifest_data
+        assert len(manifest_data["kpack_files"]) >= 1
