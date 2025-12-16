@@ -14,6 +14,9 @@ extern "C" {
 // Opaque handle to an opened kpack archive
 typedef struct kpack_archive* kpack_archive_t;
 
+// Opaque handle to a kpack cache (for loader API)
+typedef struct kpack_cache* kpack_cache_t;
+
 // Error codes
 typedef enum {
   KPACK_SUCCESS = 0,
@@ -27,6 +30,11 @@ typedef enum {
   KPACK_ERROR_NOT_IMPLEMENTED = 8,
   KPACK_ERROR_IO_ERROR = 9,
   KPACK_ERROR_MSGPACK_PARSE_FAILED = 10,
+  // Loader API error codes
+  KPACK_ERROR_PATH_DISCOVERY_FAILED = 11,
+  KPACK_ERROR_INVALID_METADATA = 12,
+  KPACK_ERROR_ARCHIVE_NOT_FOUND = 13,
+  KPACK_ERROR_ARCH_NOT_FOUND = 14,
 } kpack_error_t;
 
 // Kpack file format version

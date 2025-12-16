@@ -34,6 +34,13 @@ kpack_error_t decompress_noop(kpack_archive* archive, uint32_t ordinal,
 }
 
 kpack_error_t build_zstd_frame_index(kpack_archive* archive) {
+  // Validate blob size is reasonable before allocating
+  // Max 4GB per blob (arbitrary but prevents obvious attacks)
+  constexpr uint64_t MAX_BLOB_SIZE = 4ULL * 1024 * 1024 * 1024;
+  if (archive->zstd_size > MAX_BLOB_SIZE) {
+    return KPACK_ERROR_INVALID_FORMAT;
+  }
+
   // POC: Cache entire blob in memory
   archive->zstd_blob.resize(archive->zstd_size);
 
@@ -49,21 +56,45 @@ kpack_error_t build_zstd_frame_index(kpack_archive* archive) {
     return KPACK_ERROR_IO_ERROR;
   }
 
+  // Validate minimum blob size for header
+  if (archive->zstd_size < sizeof(uint32_t)) {
+    return KPACK_ERROR_INVALID_FORMAT;
+  }
+
   // Parse blob header
   const uint8_t* ptr = archive->zstd_blob.data();
+  const uint8_t* end = ptr + archive->zstd_size;
+
   uint32_t num_kernels;
   memcpy(&num_kernels, ptr, sizeof(uint32_t));
   ptr += sizeof(uint32_t);
 
+  // Validate kernel count is reasonable
+  // Each frame needs at least 4 bytes for size header
+  constexpr uint32_t MAX_KERNELS = 1024 * 1024;  // 1M kernels max
+  if (num_kernels > MAX_KERNELS) {
+    return KPACK_ERROR_INVALID_FORMAT;
+  }
+
   uint64_t offset = sizeof(uint32_t);  // Start after num_kernels header
   archive->zstd_frames.reserve(num_kernels);
 
-  // Parse frame headers
+  // Parse frame headers with bounds checking
   for (uint32_t i = 0; i < num_kernels; ++i) {
+    // Check bounds for frame size header
+    if (ptr + sizeof(uint32_t) > end) {
+      return KPACK_ERROR_INVALID_FORMAT;
+    }
+
     uint32_t frame_size;
     memcpy(&frame_size, ptr, sizeof(uint32_t));
     ptr += sizeof(uint32_t);
     offset += sizeof(uint32_t);
+
+    // Check bounds for frame data
+    if (ptr + frame_size > end) {
+      return KPACK_ERROR_INVALID_FORMAT;
+    }
 
     FrameInfo frame;
     frame.offset_in_blob = offset;

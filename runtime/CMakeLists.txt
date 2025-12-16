@@ -6,6 +6,8 @@ set(KPACK_SOURCES
     src/archive.cpp
     src/compression.cpp
     src/toc_parser.cpp
+    src/path_resolution.cpp
+    src/loader.cpp
 )
 
 # Library headers

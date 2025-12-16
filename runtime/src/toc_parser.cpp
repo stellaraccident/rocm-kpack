@@ -25,6 +25,11 @@ static msgpack::object* find_key(const msgpack::object_map& map,
 
 kpack_error_t parse_toc(FILE* file, uint64_t toc_offset, uint64_t file_size,
                         kpack_archive* archive) {
+  // Validate TOC offset is within file bounds
+  if (toc_offset >= file_size) {
+    return KPACK_ERROR_INVALID_FORMAT;
+  }
+
   // Seek to TOC
   if (fseek(file, toc_offset, SEEK_SET) != 0) {
     return KPACK_ERROR_IO_ERROR;

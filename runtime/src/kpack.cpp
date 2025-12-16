@@ -1,6 +1,9 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <cstdlib>
+#include <cstring>
+
 #include "kpack_internal.h"
 
 extern "C" {
@@ -55,13 +58,13 @@ kpack_error_t kpack_get_binary(kpack_archive_t archive, size_t index,
 }
 
 kpack_error_t kpack_get_kernel(kpack_archive_t archive, const char* binary_name,
-                               const char* arch, const void** kernel_data,
+                               const char* arch, void** kernel_data,
                                size_t* kernel_size) {
   if (!archive || !binary_name || !arch || !kernel_data || !kernel_size) {
     return KPACK_ERROR_INVALID_ARGUMENT;
   }
 
-  // Lookup kernel in TOC
+  // Lookup kernel in TOC (read-only, no lock needed)
   auto binary_it = archive->toc.find(binary_name);
   if (binary_it == archive->toc.end()) {
     return KPACK_ERROR_KERNEL_NOT_FOUND;
@@ -73,6 +76,9 @@ kpack_error_t kpack_get_kernel(kpack_archive_t archive, const char* binary_name,
   }
 
   const kpack::KernelMetadata& km = arch_it->second;
+
+  // Lock for kernel_cache access (decompression modifies shared buffer)
+  std::lock_guard<std::mutex> lock(archive->kernel_mutex);
 
   // Decompress based on scheme
   kpack_error_t err;
@@ -88,10 +94,20 @@ kpack_error_t kpack_get_kernel(kpack_archive_t archive, const char* binary_name,
     return err;
   }
 
-  // Return pointer to kernel cache
-  *kernel_data = archive->kernel_cache.data();
-  *kernel_size = archive->kernel_cache.size();
+  // Allocate copy for caller (thread-safe: data copied while lock held)
+  size_t size = archive->kernel_cache.size();
+  void* copy = std::malloc(size);
+  if (!copy) {
+    return KPACK_ERROR_OUT_OF_MEMORY;
+  }
+
+  std::memcpy(copy, archive->kernel_cache.data(), size);
+
+  *kernel_data = copy;
+  *kernel_size = size;
   return KPACK_SUCCESS;
 }
+
+void kpack_free_kernel(void* kernel_data) { std::free(kernel_data); }
 
 }  // extern "C"

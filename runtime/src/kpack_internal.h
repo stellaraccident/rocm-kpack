@@ -10,7 +10,10 @@
 #include <cstdio>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "rocm_kpack/kpack.h"
@@ -98,7 +101,28 @@ struct kpack_archive {
 
   // Kernel cache
   // POC: Single kernel cache - overwrites on each get_kernel()
+  // Thread safety: Lock kernel_mutex before accessing kernel_cache
+  std::mutex kernel_mutex;
   std::vector<uint8_t> kernel_cache;
+};
+
+// Cache handle struct - opaque to C API
+// Keeps archives open and env vars resolved for fast repeated access
+struct kpack_cache {
+  // Environment variables - resolved once at creation (thread-safe after init)
+  std::vector<std::string> env_path_override;  // ROCM_KPACK_PATH (split)
+  std::vector<std::string> env_path_prefix;    // ROCM_KPACK_PATH_PREFIX (split)
+  bool disabled;                               // ROCM_KPACK_DISABLE
+  bool debug;                                  // ROCM_KPACK_DEBUG
+
+  // Archive cache - keeps archives open for fast repeated access
+  // Key: canonical archive path, Value: opened archive handle
+  std::mutex archive_mutex;
+  std::unordered_map<std::string, kpack_archive_t> archives;
+
+  // Per-archive architecture sets (derived from archive TOC at open time)
+  // Used for correct arch-first search without re-querying each archive
+  std::unordered_map<std::string, std::set<std::string>> archive_archs;
 };
 
 // Internal functions (defined in other translation units)

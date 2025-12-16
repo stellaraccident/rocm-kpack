@@ -7,12 +7,18 @@ add_executable(test_kpack_runtime
     test_kpack_api.cpp
     test_utils_test.cpp
     test_archive_integration.cpp
+    test_loader_api.cpp
 )
 target_link_libraries(test_kpack_runtime
     PRIVATE
         rocm_kpack
         GTest::gtest
         GTest::gtest_main
+)
+# Include internal headers for white-box testing
+target_include_directories(test_kpack_runtime
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
 
 # Apply ASAN to tests if enabled

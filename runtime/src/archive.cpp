@@ -38,11 +38,23 @@ static kpack_error_t validate_header(FILE* file, uint32_t* version,
   return KPACK_SUCCESS;
 }
 
+// Returns file size, or 0 on error (caller should validate)
 static uint64_t get_file_size(FILE* file) {
   long current = ftell(file);
-  fseek(file, 0, SEEK_END);
+  if (current < 0) {
+    return 0;  // ftell() failed
+  }
+  if (fseek(file, 0, SEEK_END) != 0) {
+    return 0;  // fseek() failed
+  }
   long size = ftell(file);
-  fseek(file, current, SEEK_SET);
+  if (size < 0) {
+    fseek(file, current, SEEK_SET);  // Try to restore position
+    return 0;                        // ftell() failed
+  }
+  if (fseek(file, current, SEEK_SET) != 0) {
+    return 0;  // fseek() failed to restore
+  }
   return static_cast<uint64_t>(size);
 }
 
@@ -62,6 +74,10 @@ kpack_error_t kpack_open(const char* path, kpack_archive_t* archive) {
   }
 
   uint64_t file_size = kpack::get_file_size(file);
+  if (file_size == 0) {
+    fclose(file);
+    return KPACK_ERROR_IO_ERROR;  // ftell/fseek failed or empty file
+  }
 
   // Create archive handle with unique_ptr for automatic cleanup
   auto arch =
